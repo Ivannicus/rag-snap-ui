@@ -1,0 +1,331 @@
+{
+  "generated_at": "2026-04-09T13:59:32Z",
+  "model": "mistral.mistral-large-3-675b-instruct",
+  "results": [
+    {
+      "id": "1.1",
+      "question": "Describe how your platform supports deployment across three geographically separate physical sites with a unified control plane. How does the control plane handle the complete loss of one site without service interruption?\nContext: We require the platform to remain operational and writable if any single site goes offline.\n",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "1.2",
+      "question": "How does your platform define and enforce availability zones and failure domains? Can workload placement policies be configured to ensure redundant instances always land in separate physical locations (sites, racks, chassis)?",
+      "answer": "The provided context does not explicitly define \"availability zones\" or their enforcement.\n\nFailure domains are defined as entities (e.g., OSDs, hosts, racks, rooms, or data centers) across which Ceph spreads object replicas to mitigate data loss. MicroCeph automatically manages failure domains, starting at the OSD level and scaling up to the host level (with ≥3 nodes). CRUSH rules enforce redundancy by ensuring replicas are distributed across distinct failure domains (e.g., no two replicas on the same host).\n\nWorkload placement policies (e.g., **Spread policy** in placement groups) distribute instances across cluster members for high availability, but the context does not confirm if this explicitly maps to separate physical locations like sites or racks. Strict and permissive rigor options enforce or relax policy compliance."
+    },
+    {
+      "id": "1.3",
+      "question": "What distributed database and messaging components underpin your control plane (e.g., MariaDB Galera, RabbitMQ, etcd)? How are these configured for resilience at scale, and what are the practical node-count limits before performance or stability degrades? Context: We are aware of known RabbitMQ scaling challenges at \u003e500 nodes and want to understand how your platform addresses or avoids this.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "1.4",
+      "question": "Does your platform support heterogeneous hardware across nodes and sites? Can nodes with different CPU generations, memory configurations, and storage types coexist in the same cluster and be scheduled against?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "1.5",
+      "question": "What is the largest production deployment of your platform in terms of compute nodes, active workloads, and physical sites? Please provide reference customer examples if available.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.1",
+      "question": "Does your platform natively manage virtual machines, containers (Docker/Podman, LXC/LXD), container orchestration (Kubernetes), and bare metal nodes through a single unified API and management interface? Context: We want to avoid operating separate control planes for different workload types wherever possible.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.2",
+      "question": "What hypervisor does your platform use for VM workloads? Can the platform run workloads directly on bare metal without a hypervisor layer to eliminate virtualization overhead for performance-sensitive use cases?",
+      "answer": "The platform uses `qemu` for virtual machine functionality.\n\nThe provided context does not contain enough information to answer whether the platform can run workloads directly on bare metal without a hypervisor layer."
+    },
+    {
+      "id": "2.3",
+      "question": "Describe your bare metal provisioning capabilities. How are physical nodes onboarded, imaged, and lifecycle-managed? Does the platform support boot-from-remote-volume (e.g., iSCSI from Ceph/Cinder) to enable bare metal snapshots, backups, and migration between physical servers?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.4",
+      "question": "How does your platform manage GPU workloads? Does it support direct GPU pass-through for near-native performance? Does it support NVIDIA Multi-Instance GPU (MIG) for virtualizing a single GPU across multiple users or workloads?",
+      "answer": "The platform supports direct GPU pass-through using the `physical` `gputype` for both containers and VMs, and CDI mode for specific GPUs. It supports NVIDIA Multi-Instance GPU (MIG) via the `mig` `gputype`, but only for containers."
+    },
+    {
+      "id": "2.5",
+      "question": "Does your platform natively automate GPU driver and CUDA library patching across compute nodes? If not, what is the recommended approach for managing the GPU software lifecycle?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.6",
+      "question": "Describe your HPC support. How are HPC clusters provisioned and managed? Does the platform support dedicated InfiniBand fabric per cluster? Can a single workload attach multiple NICs simultaneously (e.g., InfiniBand + Ethernet)?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.7",
+      "question": "Does your workload scheduler support NUMA topology-aware placement for CPU and memory-intensive workloads? Does it integrate with KubeFlow or Ray for distributed AI/ML training?",
+      "answer": "The provided context states that in a multi-NUMA node environment, the guest scheduler can properly reason about sockets, cores, threads, and NUMA topology when sharing memory or moving processes across NUMA nodes. It does not mention integration with KubeFlow or Ray."
+    },
+    {
+      "id": "2.8",
+      "question": "Describe your managed Kubernetes offering. How are clusters provisioned, upgraded, and scaled? Can Kubernetes control plane nodes be distributed across multiple availability zones for high availability?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "2.9",
+      "question": "What is the process for adding a new physical server to the cluster? How much of the onboarding process is automated, and what manual steps are required?",
+      "answer": "To add a new physical server to the cluster:\n1. Run `lxd init` on the server (as root/sudo), select clustering, provide its reachable IP/DNS, confirm joining an existing cluster, and authenticate using a join token generated from the cluster.\n2. The joining process is manual except for automatic detection of the initiator (if multicast is supported). You must manually run `lxd init`, answer prompts, and provide the join token."
+    },
+    {
+      "id": "2.10",
+      "question": "What tooling does your platform provide to assist with migrating existing workloads from VMware, Nutanix, Hyper-V, and physical servers? What are the limitations of your migration tooling?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "3.1",
+      "question": "How does your platform integrate with provider VLAN-based networking? Does your SDN layer support Cisco and Juniper physical switch drivers to manage physical network devices alongside virtual switching?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "3.2",
+      "question": "Describe your IP address management model. Does it support integration with an existing enterprise IPAM system for hybrid address management? Does it support static IP assignment as the primary addressing model? Context: Static IP allocation is our dominant addressing model. We require centralized IP assignment workflows and support for pre-approved IP pools per project.",
+      "answer": "The provided context describes IPAM (IP Address Management) as a method to plan, track, and manage IP address space within LXD deployments. It provides visibility into used IPs for instances, networks, and other entities but **does not mention** integration with enterprise IPAM systems or hybrid address management.\n\nIt **does support static IP assignment** for instances via NIC configuration (e.g., `lxc config device set \u003cinstance\u003e \u003cnic\u003e ipv4.address=\u003cip\u003e`), but this is manually managed rather than centralized or pool-based."
+    },
+    {
+      "id": "3.3",
+      "question": "How does your platform enforce tenant network isolation? Can each project or tenant operate within its own isolated internal network, with floating IP allocation for workloads that need external access?",
+      "answer": "Projects encapsulate instances and can isolate networks by enabling the `features.networks` configuration. Each project with `features.networks` enabled uses a separate set of networks, independent of the `default` project. Floating IP allocation for external access is supported via network forwards, allowing external IPs to be mapped to internal IPs in isolated project networks."
+    },
+    {
+      "id": "3.4",
+      "question": "Do VMs and Kubernetes pods share the same software-defined network and policy model, or do they operate on separate network planes? Can the same security and networking policies be preserved when moving a workload from a VM to a container?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "3.5",
+      "question": "How does your platform extend networking to cloud environments (AWS/Azure) for hybrid burst workloads? What VPN or interconnect mechanism is used, and how are on-premises and cloud IP spaces managed together?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "3.6",
+      "question": "Does your platform support direct hardware access for near-zero latency network connectivity (e.g., SR-IOV, RDMA)? How is this provisioned and managed in a multi-tenant environment?",
+      "answer": "Yes, the platform supports direct hardware access for InfiniBand devices, including SR-IOV (Single Root I/O Virtualization).\n\nFor InfiniBand, SR-IOV virtual functions can be passed into instances using the `sriov` network type, but virtual functions must be pre-configured in the kernel module. This works only in a non-dynamic way, and hotplugging is supported only for containers, not for VMs."
+    },
+    {
+      "id": "4.1",
+      "question": "How does your platform integrate with Ceph distributed storage for VM block volumes and Kubernetes persistent volumes? What Ceph versions and drivers are supported? What is your recommended Ceph deployment architecture for a three-site cluster?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "4.2",
+      "question": "How does your platform support enterprise shared file storage (NetApp NFS/SMB/iSCSI)? Can shared file systems be mounted directly inside VMs, containers, and bare metal instances?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "4.3",
+      "question": "Describe your snapshot and backup capabilities for VMs and volumes. How are backups scheduled and managed? Does the platform support off-site backup replication for disaster recovery?",
+      "answer": "LXD supports snapshots for storage volumes, which save the volume's state at a specific time for easy restoration. Custom storage volumes must be backed up separately as they are not included in instance backups.\n\nFor disaster recovery, off-site backup replication is possible with storage replication, requiring separate LXD deployments and storage array configuration. This must be set up outside of LXD according to the storage vendor's specifications.\n\nThe provided context does not contain enough information to answer how backups are scheduled and managed."
+    },
+    {
+      "id": "4.4",
+      "question": "Does your platform support asynchronous storage replication between sites for DR purposes? What is the minimum achievable RPO for protected workloads using asynchronous replication?",
+      "answer": "Recovery with storage replication is only possible when using remote storage drivers that support volume recovery. Asynchronous replication is supported, and the RPO (Recovery Point Objective) for protected workloads depends on the replication schedule—any data written since the last successful replication may be lost. The provided context does not specify a minimum achievable RPO."
+    },
+    {
+      "id": "4.5",
+      "question": "Does your platform provide or integrate with object storage (S3-compatible or OpenStack Swift)? What use cases does it address, and what protocols are supported?",
+      "answer": "Yes, the platform integrates with Ceph Object Gateway (RGW), which provides object storage compatible with S3 and OpenStack Swift protocols. It addresses use cases such as backups, images, and logs, and supports Keystone authentication for OpenStack integration."
+    },
+    {
+      "id": "5.1",
+      "question": "How does your platform integrate with enterprise SSO systems using Okta via SAML or OIDC? Describe the federation architecture and how platform roles and permissions map to enterprise identity groups and LDAP attributes.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.2",
+      "question": "Describe your role-based access control model. How are permissions scoped to projects and tenants? Can access control policies be enforced consistently across VMs, containers, and bare metal workloads from a single policy definition?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.3",
+      "question": "Does your platform provide hardened OS images out of the box? Which hardening standards are supported (CIS Level 1, CIS Level 2, DISA STIG)? How is automated baseline configuration enforced on newly provisioned instances?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.4",
+      "question": "Is your platform FIPS 140-3 validated, or does it support a FIPS 140-3 compliant configuration? If validation is not out-of-the-box, what steps and restrictions are involved in achieving a FIPS-compliant deployment?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.5",
+      "question": "How does your platform enforce isolation between tenants and between workloads of different sensitivity levels? Describe the available network segmentation, access control, and encryption mechanisms.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.6",
+      "question": "What security constraints does your platform place on the host OS to protect the cluster from workload-level exploits or escapes? How does this security model differ between VMs, containers, and bare metal?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "5.7",
+      "question": "How does your platform support audit logging? What platform events are logged, and how are those logs forwarded to an enterprise SIEM such as Splunk?",
+      "answer": "The platform supports audit logging via `lifecycle` event types in LXD, which show an audit trail for specific actions. Logs can be streamed using the `/1.0/events` API endpoint or `lxc monitor`. For centralized logging, host-level log shipping mechanisms (e.g., rsyslog, journald) can forward logs to a central system like ELK or Loki. The context does not mention Splunk specifically."
+    },
+    {
+      "id": "5.8",
+      "question": "Has your platform been deployed in environments subject to NIST 800-53, FedRAMP, CMMC, or similar compliance requirements? If so, describe your experience and any available compliance documentation.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.1",
+      "question": "Describe your end-user self-service portal. What workload lifecycle operations can users perform directly, such as creating, resizing, snapshotting, restoring, and deleting Kubernetes clusters, and bare metal instances?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.2",
+      "question": "Is your platform API consistent across on-premises and major cloud providers (AWS, Azure)? Can the same API calls and CLI tooling manage workloads across on-premises and cloud regions under a single control plane?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.3",
+      "question": "Describe your Terraform and Ansible support. Are there official providers and modules available? What depth of IaC coverage exists for provisioning, configuration management, and lifecycle operations?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.4",
+      "question": "Does your platform support GitOps, ArgoCD , GitHub Actions, and/or Jenkins integration for managing VM and container state declaratively from a Git repository?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.5",
+      "question": "Describe your platform’s automated health monitoring and self-healing capabilities. How does it detect and respond to compute node failures, storage degradation, and network faults?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.6",
+      "question": "Does your platform support workload right-sizing? Can it track resource utilization over time and recommend or automatically adjust CPU, memory, and storage allocations for running workloads?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "6.7",
+      "question": "How are major and minor platform upgrades performed? What is the expected downtime impact, and what is the recommended process for validating upgrades before applying them to production?",
+      "answer": "Major upgrades (LTS-to-LTS) are manual, potentially disruptive operations managed by MicroOVN to minimize complexity but require operator initiation. Minor upgrades occur automatically within a stable channel (e.g., `24.03/stable`) with minimal plane outage during service restarts.\n\nThe provided context does not contain enough information to answer whether there is a recommended process for validating upgrades before applying them to production."
+    },
+    {
+      "id": "7.1",
+      "question": "What monitoring and telemetry does your platform provide natively? At what granularity is data collected — cluster, site, node, and individual workload levels? What metrics are available for CPU, RAM, storage, network, and GPU utilization?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "7.2",
+      "question": "How does your platform integrate with Splunk for centralized log aggregation, metrics forwarding, and security event monitoring?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "7.3",
+      "question": "Does your platform provide native usage metering per project or tenant for CPU, RAM, storage, GPU, and network resources? How is this data exposed for showback and chargeback reporting? Context: Showback and chargeback are firm requirements. We understand some platforms do not provide these natively; we want to understand your approach and any third-party integrations required.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "7.4",
+      "question": "Does your platform support hybrid billing models that combine allocated capacity and actual resource consumption? Can billing be applied per project, per tenant, and per cost code?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "8.1",
+      "question": "How does your platform support disaster recovery across geographically separated sites? Describe the replication mechanisms, failover automation, and failback procedures available.",
+      "answer": "The platform supports disaster recovery across geographically separated sites using **Active-Active** or **Active-Passive** replication:\n\n1. **Replication Mechanisms**:\n   - **Active-Active**: Real-time synchronization between sites, where each operation is acknowledged by all sites before completion (may introduce latency).\n   - **Active-Passive**: Asynchronous replication to a backup site, activated only during failover (minor data delays accepted).\n\n2. **Failover**:\n   - For **Active-Active**, users automatically switch to another site if one fails, with no data loss.\n   - For **Active-Passive**, the secondary site becomes operational after manual or vendor-specific promotion of the storage array.\n\n3. **Failback Procedures**:\n   - Shut down resources on the secondary site and restart them on the primary (if no modifications were made).\n   - Alternatively, set up a fresh deployment on the primary and repeat disaster recovery steps.\n   - Requires demoting the secondary storage array and promoting the primary array via vendor-specific methods."
+    },
+    {
+      "id": "8.2",
+      "question": "What is the minimum achievable RPO and RTO for a full site failover using your platform’s native DR capabilities?",
+      "answer": "The provided context does not contain enough information to answer this question. The context discusses RPO and RTO concepts but does not specify achievable values for a full site failover."
+    },
+    {
+      "id": "8.3",
+      "question": "Does your platform support a tiered DR model where different workloads have different recovery time and point objectives, for example near-instant failover for critical infrastructure services versus multi-day recovery for lower-priority workloads?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "8.4",
+      "question": "Does your platform support native cloud bursting to AWS and Azure? How are on-premises and cloud resources managed under a unified control plane during a burst event? What networking and security policy continuity is maintained across the burst boundary? Context: On-premises infrastructure is always the primary hosting environment. Cloud burst is used for capacity overflow and HPC job queue overflow only.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "8.5",
+      "question": "How does your licensing model handle cloud burst usage? Can on-premises licenses be extended to cloud, and can cloud burst consumption be billed on a pay-as-you-go basis? Context: We understand some vendors allow license portability between on-premises and cloud; please describe your model in detail.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "9.1",
+      "question": "Does your platform provide a native interface or integration for Jupyter Notebooks and model serving? How are these provisioned, managed, and secured in a multi-tenant environment?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "9.2",
+      "question": "Does your platform natively support or integrate with KubeFlow or Ray for distributed AI/ML training workloads?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "9.3",
+      "question": "Does your platform provide any native tooling for running, deploying, or fine-tuning Large Language Models (LLMs)? Describe any AI/ML platform capabilities included with your solution.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "9.4",
+      "question": "For AI and HPC workloads, can users run directly on bare metal to eliminate the hypervisor performance overhead? How is bare metal access provisioned, isolated, and secured in a shared multi-tenant cluster?",
+      "answer": "The provided context states that cluster members can run \"full virtual machines or lightweight system containers with **bare-metal performance**.\"\n\nHowever, the context does **not** describe:\n- How bare metal access is provisioned, isolated, or secured in a shared multi-tenant environment.\n- Whether users can run directly on bare metal (without virtualization or containers).\n\n**Answer:** The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "9.5",
+      "question": "Does your platform have any experience with or native support for Solaris SPARC emulation on x86? There is a legacy SPARC workloads currently under evaluation for migration. Context: We are evaluating Stromasys CHARON for SPARC-on-x86 emulation. Please describe any integration or compatibility your platform has with similar emulation environments.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.1",
+      "question": "Describe your licensing model. Is it based on physical cores, sockets, nodes, VMs, or another metric? How does the cost structure scale as the cluster grows from approximately 20 workloads to 20,000 or more?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.2",
+      "question": "Is the licensing model the same for on-premises and cloud deployments? Can licenses be moved between on-premises and cloud, and can cloud burst usage be billed separately on a pay-as-you-go basis?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.3",
+      "question": "What support tiers do you offer? Describe response time SLAs, support channels, and escalation paths for critical production incidents.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.4",
+      "question": "Do you offer professional services for initial deployment, workload migration, and platform training? Describe the typical engagement model and estimated scope for a deployment of this size.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.5",
+      "question": "Is your platform available on a GSA Schedule or other government procurement vehicle? Do you have existing government agency or national laboratory customers we may contact as references?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "10.6",
+      "question": "What is your platform’s product roadmap for the next 12 to 24 months? Are there capabilities referenced in this RFI that are currently on your roadmap but not yet generally available? Please identify planned availability dates.",
+      "answer": "The provided roadmap outlines plans for:\n\n- **25.05 (Oct 2024–Apr 2025):** OVN network improvements, SSH key on instance creation, storage driver support, and default storage pool fixes.\n- **25.10 (May–Oct 2025):** Storage buckets, automatic workload distribution, cluster links, and additional storage driver support.\n- **26.04 (Oct 2025–May 2026):** Cluster links, workload placement, richer UI elements, storage volume migration, and expanded storage driver support.\n\nSome capabilities (e.g., storage buckets, cluster links) are planned but not yet generally available. No specific availability dates are provided."
+    },
+    {
+      "id": "11.1",
+      "question": "Given the requirements described in this RFI, what platform architecture would you recommend, and why? Are there aspects of our stated approach you would suggest reconsidering based on your deployment experience with customers of a similar scale?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "11.2",
+      "question": "What are the most common implementation challenges for a deployment of this scale and complexity? What have customers at a similar scale struggled with, and how were those challenges resolved?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "11.3",
+      "question": "What infrastructure, networking, or organizational prerequisites does your platform require that are not described in our project context? Are there dependencies we should plan for that may affect our timeline?",
+      "answer": "The provided context does not contain enough information to answer this question."
+    },
+    {
+      "id": "11.4",
+      "question": "Is there anything in this RFI that is ambiguous, inconsistent, or that would prevent you from providing an accurate response? Please flag any concerns or questions you have about our stated requirements.",
+      "answer": "The provided context does not contain enough information to answer this question."
+    }
+  ]
+}

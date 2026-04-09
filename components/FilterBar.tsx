@@ -1,0 +1,132 @@
+"use client";
+
+import React from "react";
+import type { Filters, FilterStatus } from "@/lib/types";
+
+interface Props {
+  filters: Filters;
+  sections: string[];
+  onChange: (filters: Filters) => void;
+  resultCount: number;
+  totalCount: number;
+}
+
+const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "answered", label: "Answered" },
+  { value: "unanswered", label: "Unanswered" },
+];
+
+export default function FilterBar({
+  filters,
+  sections,
+  onChange,
+  resultCount,
+  totalCount,
+}: Props) {
+  const hasActiveFilters =
+    filters.status !== "all" || filters.section !== "" || filters.search !== "";
+
+  function setStatus(status: FilterStatus) {
+    onChange({ ...filters, status });
+  }
+
+  function setSection(section: string) {
+    onChange({ ...filters, section });
+  }
+
+  function setSearch(search: string) {
+    onChange({ ...filters, search });
+  }
+
+  function clearFilters() {
+    onChange({ status: "all", section: "", search: "" });
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+      <div className="max-w-5xl mx-auto flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+
+        {/* Status toggle buttons */}
+        <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
+          {STATUS_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setStatus(value)}
+              className={`
+                px-3 py-1.5 text-sm font-medium transition-colors
+                ${filters.status === value
+                  ? value === "unanswered"
+                    ? "bg-red-500 text-white"
+                    : value === "answered"
+                    ? "bg-green-500 text-white"
+                    : "bg-blue-600 text-white"
+                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }
+              `}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Section dropdown */}
+        <select
+          value={filters.section}
+          onChange={(e) => setSection(e.target.value)}
+          className="text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">All sections</option>
+          {sections.map((sec) => (
+            <option key={sec} value={sec}>
+              Section {sec}
+            </option>
+          ))}
+        </select>
+
+        {/* Search input */}
+        <div className="relative flex-1 min-w-0">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search questions and answers…"
+            value={filters.search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-8 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {filters.search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Result count + clear */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+            {resultCount} / {totalCount}
+          </span>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
