@@ -9,10 +9,23 @@ interface Props {
   section: string;
   items: QAItem[];
   searchTerm?: string;
+  editedAnswers: Record<string, string>;
+  onSaveEdit: (id: string, answer: string) => void;
+  onClearEdit: (id: string) => void;
 }
 
-export default function SectionGroup({ section, items, searchTerm = "" }: Props) {
-  const unansweredCount = items.filter((i) => isUnanswered(i.answer)).length;
+export default function SectionGroup({
+  section,
+  items,
+  searchTerm = "",
+  editedAnswers,
+  onSaveEdit,
+  onClearEdit,
+}: Props) {
+  const unansweredCount = items.filter(
+    (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
+  ).length;
+  const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
   return (
     <div>
@@ -30,6 +43,11 @@ export default function SectionGroup({ section, items, searchTerm = "" }: Props)
               {unansweredCount} unanswered
             </span>
           )}
+          {editedCount > 0 && (
+            <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+              {editedCount} edited
+            </span>
+          )}
         </div>
         <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
       </div>
@@ -37,7 +55,14 @@ export default function SectionGroup({ section, items, searchTerm = "" }: Props)
       {/* Question cards */}
       <div className="flex flex-col gap-2">
         {items.map((item) => (
-          <QuestionCard key={item.id} item={item} searchTerm={searchTerm} />
+          <QuestionCard
+            key={item.id}
+            item={item}
+            searchTerm={searchTerm}
+            editedAnswer={editedAnswers[item.id]}
+            onSaveEdit={onSaveEdit}
+            onClearEdit={onClearEdit}
+          />
         ))}
       </div>
     </div>

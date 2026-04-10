@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import Header from "@/components/Header";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
+import ExportButton from "@/components/ExportButton";
 import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
 import type { ParsedQAFile, Filters, QAItem } from "@/lib/types";
 
@@ -14,15 +15,14 @@ export default function Home() {
   const [filename, setFilename] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [darkMode, setDarkMode] = useState(false);
+  // Map of item id → edited answer text
+  const [editedAnswers, setEditedAnswers] = useState<Record<string, string>>({});
 
   // Sync dark mode class on <html>
   useEffect(() => {
     const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
+    if (darkMode) root.classList.add("dark");
+    else root.classList.remove("dark");
   }, [darkMode]);
 
   // Load persisted dark mode preference
@@ -42,12 +42,30 @@ export default function Home() {
     setData(loaded);
     setFilename(name);
     setFilters(DEFAULT_FILTERS);
+    setEditedAnswers({});
   }, []);
 
-  // Compute counts for header
+  const handleSaveEdit = useCallback((id: string, answer: string) => {
+    setEditedAnswers((prev) => ({ ...prev, [id]: answer }));
+  }, []);
+
+  const handleClearEdit = useCallback((id: string) => {
+    setEditedAnswers((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  // Unanswered count: only items without a saved edit
   const unansweredCount = useMemo(
-    () => (data ? data.items.filter((i) => isUnanswered(i.answer)).length : 0),
-    [data]
+    () =>
+      data
+        ? data.items.filter(
+            (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
+          ).length
+        : 0,
+    [data, editedAnswers]
   );
 
   // Get all unique sections
@@ -56,26 +74,31 @@ export default function Home() {
     [data]
   );
 
-  // Apply filters
+  // Apply filters (search also checks edited answer when present)
   const filteredItems = useMemo((): QAItem[] => {
     if (!data) return [];
     const { status, section, search } = filters;
     const term = search.toLowerCase();
     return data.items.filter((item) => {
-      if (status === "answered" && isUnanswered(item.answer)) return false;
-      if (status === "unanswered" && !isUnanswered(item.answer)) return false;
+      const effectiveAnswer = editedAnswers[item.id] ?? item.answer;
+      const effectivelyUnanswered =
+        isUnanswered(item.answer) && !editedAnswers[item.id];
+      if (status === "answered" && effectivelyUnanswered) return false;
+      if (status === "unanswered" && !effectivelyUnanswered) return false;
       if (section && item.id.split(".")[0] !== section) return false;
       if (term) {
         const inQ = item.question.toLowerCase().includes(term);
-        const inA = item.answer.toLowerCase().includes(term);
+        const inA = effectiveAnswer.toLowerCase().includes(term);
         if (!inQ && !inA) return false;
       }
       return true;
     });
-  }, [data, filters]);
+  }, [data, filters, editedAnswers]);
 
   // Group filtered items by section
   const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
+
+  const editCount = Object.keys(editedAnswers).length;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -122,10 +145,32 @@ export default function Home() {
                     section={section}
                     items={items}
                     searchTerm={filters.search}
+                    editedAnswers={editedAnswers}
+                    onSaveEdit={handleSaveEdit}
+                    onClearEdit={handleClearEdit}
                   />
                 ))}
               </div>
             )}
+
+            {/* Export section — always shown at the bottom when data is loaded */}
+            <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  Export results
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {editCount > 0
+                    ? `${editCount} edited answer${editCount !== 1 ? "s" : ""} will replace the originals in the export.`
+                    : "No edits yet — export will use all original answers."}
+                </p>
+              </div>
+              <ExportButton
+                data={data}
+                editedAnswers={editedAnswers}
+                sourceFilename={filename}
+              />
+            </div>
           </main>
         </>
       ) : (
