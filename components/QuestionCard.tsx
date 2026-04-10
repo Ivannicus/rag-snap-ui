@@ -33,7 +33,9 @@ function renderAnswer(text: string, searchTerm: string): React.ReactNode {
   const lines = text.split("\n");
   return lines.map((line, idx) => {
     const isBullet = /^[-*]\s/.test(line);
-    const boldParts = line.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+    // Strip the leading "- " or "* " so the list-disc style doesn't double up
+    const lineContent = isBullet ? line.replace(/^[-*]\s+/, "") : line;
+    const boldParts = lineContent.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
       const isBoldMarker = part.startsWith("**") && part.endsWith("**");
       const inner = isBoldMarker ? part.slice(2, -2) : part;
       const highlighted = highlight(inner, searchTerm);
