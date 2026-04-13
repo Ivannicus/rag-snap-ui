@@ -6,41 +6,51 @@ import type { ParsedQAFile } from "@/lib/types";
 interface Props {
   data: ParsedQAFile;
   editedAnswers: Record<string, string>;
+  ratings: Record<string, number>;
   sourceFilename: string | null;
 }
 
-export default function ExportButton({ data, editedAnswers, sourceFilename }: Props) {
+/** Escape a value for CSV: wrap in quotes if it contains commas, quotes, or newlines. */
+function csvCell(value: string | number | undefined): string {
+  const str = value === undefined || value === null ? "" : String(value);
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildCsv(
+  data: ParsedQAFile,
+  editedAnswers: Record<string, string>,
+  ratings: Record<string, number>
+): string {
+  const header = ["Question", "Original Answer", "Edited Answer", "Rating"];
+  const rows = data.items.map((item) => [
+    csvCell(item.question),
+    csvCell(item.answer),
+    csvCell(editedAnswers[item.id] ?? ""),
+    csvCell(ratings[item.id]),
+  ]);
+  return [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+}
+
+export default function ExportButton({ data, editedAnswers, ratings, sourceFilename }: Props) {
   const [exported, setExported] = useState(false);
 
   const editCount = Object.keys(editedAnswers).length;
+  const ratingCount = Object.keys(ratings).length;
 
   function handleExport() {
-    const items = data.items.map((item) => ({
-      id: item.id,
-      question: item.question,
-      answer: editedAnswers[item.id] ?? item.answer,
-    }));
-
-    const payload = {
-      generated_at: data.generated_at,
-      model: data.model,
-      exported_at: new Date().toISOString(),
-      edits_applied: editCount,
-      results: items,
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
+    const csv = buildCsv(data, editedAnswers, ratings);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
 
-    // Derive output filename from source: foo.json → foo-edited.json
     const base = sourceFilename
       ? sourceFilename.replace(/\.json$/i, "")
       : "results";
-    a.download = `${base}-edited.json`;
+    a.download = `${base}-export.csv`;
 
     a.click();
     URL.revokeObjectURL(url);
@@ -74,10 +84,15 @@ export default function ExportButton({ data, editedAnswers, sourceFilename }: Pr
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
-          Export JSON
-          {editCount > 0 && (
+          Export CSV
+          {(editCount > 0 || ratingCount > 0) && (
             <span className="bg-white/20 text-xs px-1.5 py-0.5 rounded-full">
-              {editCount} edit{editCount !== 1 ? "s" : ""}
+              {[
+                editCount > 0 && `${editCount} edit${editCount !== 1 ? "s" : ""}`,
+                ratingCount > 0 && `${ratingCount} rating${ratingCount !== 1 ? "s" : ""}`,
+              ]
+                .filter(Boolean)
+                .join(", ")}
             </span>
           )}
         </>

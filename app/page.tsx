@@ -17,6 +17,8 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(false);
   // Map of item id → edited answer text
   const [editedAnswers, setEditedAnswers] = useState<Record<string, string>>({});
+  // Map of item id → 1–5 rating
+  const [ratings, setRatings] = useState<Record<string, number>>({});
 
   // Sync dark mode class on <html>
   useEffect(() => {
@@ -43,6 +45,19 @@ export default function Home() {
     setFilename(name);
     setFilters(DEFAULT_FILTERS);
     setEditedAnswers({});
+    setRatings({});
+  }, []);
+
+  const handleSaveRating = useCallback((id: string, rating: number) => {
+    setRatings((prev) => ({ ...prev, [id]: rating }));
+  }, []);
+
+  const handleClearRating = useCallback((id: string) => {
+    setRatings((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }, []);
 
   const handleSaveEdit = useCallback((id: string, answer: string) => {
@@ -148,6 +163,9 @@ export default function Home() {
                     editedAnswers={editedAnswers}
                     onSaveEdit={handleSaveEdit}
                     onClearEdit={handleClearEdit}
+                    ratings={ratings}
+                    onSaveRating={handleSaveRating}
+                    onClearRating={handleClearRating}
                   />
                 ))}
               </div>
@@ -160,14 +178,14 @@ export default function Home() {
                   Export results
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {editCount > 0
-                    ? `${editCount} edited answer${editCount !== 1 ? "s" : ""} will replace the originals in the export.`
-                    : "No edits yet — export will use all original answers."}
+                  CSV with question, original answer, edited answer, and rating columns.
+                  {editCount > 0 && ` ${editCount} edited answer${editCount !== 1 ? "s" : ""} included.`}
                 </p>
               </div>
               <ExportButton
                 data={data}
                 editedAnswers={editedAnswers}
+                ratings={ratings}
                 sourceFilename={filename}
               />
             </div>
