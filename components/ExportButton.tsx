@@ -7,6 +7,7 @@ interface Props {
   data: ParsedQAFile;
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
+  contextUrls: Record<string, string>;
   sourceFilename: string | null;
 }
 
@@ -22,26 +23,28 @@ function csvCell(value: string | number | undefined): string {
 function buildCsv(
   data: ParsedQAFile,
   editedAnswers: Record<string, string>,
-  ratings: Record<string, number>
+  ratings: Record<string, number>,
+  contextUrls: Record<string, string>
 ): string {
-  const header = ["Question", "Original Answer", "Edited Answer", "Rating"];
+  const header = ["Question", "Original Answer", "Edited Answer", "Context URL", "Rating"];
   const rows = data.items.map((item) => [
     csvCell(item.question),
     csvCell(item.answer),
     csvCell(editedAnswers[item.id] ?? ""),
+    csvCell(contextUrls[item.id] ?? ""),
     csvCell(ratings[item.id]),
   ]);
   return [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
 }
 
-export default function ExportButton({ data, editedAnswers, ratings, sourceFilename }: Props) {
+export default function ExportButton({ data, editedAnswers, ratings, contextUrls, sourceFilename }: Props) {
   const [exported, setExported] = useState(false);
 
   const editCount = Object.keys(editedAnswers).length;
   const ratingCount = Object.keys(ratings).length;
 
   function handleExport() {
-    const csv = buildCsv(data, editedAnswers, ratings);
+    const csv = buildCsv(data, editedAnswers, ratings, contextUrls);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

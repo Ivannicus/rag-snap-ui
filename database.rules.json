@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "sessions": {
+      "$sessionId": {
+        ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
+        ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
+      }
+    }
+  }
+}

@@ -15,6 +15,9 @@ interface Props {
   ratings: Record<string, number>;
   onSaveRating: (id: string, rating: number) => void;
   onClearRating: (id: string) => void;
+  contextUrls: Record<string, string>;
+  onSaveContextUrl: (id: string, url: string) => void;
+  onClearContextUrl: (id: string) => void;
 }
 
 export default function SectionGroup({
@@ -27,6 +30,9 @@ export default function SectionGroup({
   ratings,
   onSaveRating,
   onClearRating,
+  contextUrls,
+  onSaveContextUrl,
+  onClearContextUrl,
 }: Props) {
   const unansweredCount = items.filter(
     (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
@@ -71,6 +77,9 @@ export default function SectionGroup({
             rating={ratings[item.id]}
             onSaveRating={onSaveRating}
             onClearRating={onClearRating}
+            contextUrl={contextUrls[item.id]}
+            onSaveContextUrl={onSaveContextUrl}
+            onClearContextUrl={onClearContextUrl}
           />
         ))}
       </div>

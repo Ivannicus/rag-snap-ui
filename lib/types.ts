@@ -25,3 +25,11 @@ export interface Filters {
   section: string; // "" means all sections
   search: string;
 }
+
+export interface SessionState {
+  data: ParsedQAFile;
+  filename: string;
+  editedAnswers: Record<string, string>;
+  ratings: Record<string, number>;
+  contextUrls: Record<string, string>;
+}
