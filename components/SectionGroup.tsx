@@ -56,6 +56,9 @@ export default function SectionGroup({
   const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
   const assigneeName = teamMembers.find((m) => m.id === assigneeId)?.name ?? "Unassigned";
 
+  const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
+  const reviewerName = teamMembers.find((m) => m.id === reviewerId)?.name ?? "Unassigned";
+
   return (
     <div>
       {/* Section header */}
@@ -65,7 +68,10 @@ export default function SectionGroup({
             Section {section}
           </span>
           <span className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-            {assigneeName}
+            Assignee: {assigneeName}
+          </span>
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+            Reviewer: {reviewerName}
           </span>
           <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
             {items.length} {items.length === 1 ? "question" : "questions"}
