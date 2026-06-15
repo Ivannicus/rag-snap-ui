@@ -3,7 +3,7 @@
 import React from "react";
 import QuestionCard from "./QuestionCard";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem } from "@/lib/types";
+import type { QAItem, TeamMember } from "@/lib/types";
 
 interface Props {
   section: string;
@@ -18,6 +18,13 @@ interface Props {
   contextUrls: Record<string, string>;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
+  assignees: Record<string, string>;
+  onSaveAssignee: (id: string, memberId: string) => void;
+  onClearAssignee: (id: string) => void;
+  reviewers: Record<string, string>;
+  onSaveReviewer: (id: string, memberId: string) => void;
+  onClearReviewer: (id: string) => void;
+  teamMembers: TeamMember[];
 }
 
 export default function SectionGroup({
@@ -33,11 +40,21 @@ export default function SectionGroup({
   contextUrls,
   onSaveContextUrl,
   onClearContextUrl,
+  assignees,
+  onSaveAssignee,
+  onClearAssignee,
+  reviewers,
+  onSaveReviewer,
+  onClearReviewer,
+  teamMembers,
 }: Props) {
   const unansweredCount = items.filter(
     (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
   ).length;
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
+
+  const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
+  const assigneeName = teamMembers.find((m) => m.id === assigneeId)?.name ?? "Unassigned";
 
   return (
     <div>
@@ -46,6 +63,9 @@ export default function SectionGroup({
         <div className="flex items-center gap-2">
           <span className="text-lg font-bold text-gray-900 dark:text-white">
             Section {section}
+          </span>
+          <span className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+            {assigneeName}
           </span>
           <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
             {items.length} {items.length === 1 ? "question" : "questions"}
@@ -80,6 +100,13 @@ export default function SectionGroup({
             contextUrl={contextUrls[item.id]}
             onSaveContextUrl={onSaveContextUrl}
             onClearContextUrl={onClearContextUrl}
+            assignee={assignees[item.id]}
+            onSaveAssignee={onSaveAssignee}
+            onClearAssignee={onClearAssignee}
+            reviewer={reviewers[item.id]}
+            onSaveReviewer={onSaveReviewer}
+            onClearReviewer={onClearReviewer}
+            teamMembers={teamMembers}
           />
         ))}
       </div>

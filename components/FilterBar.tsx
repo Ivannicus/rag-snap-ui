@@ -1,7 +1,9 @@
 "use client";
 
-import React from "react";
-import type { Filters, FilterStatus } from "@/lib/types";
+import React, { useState } from "react";
+import { addTeamMember, removeTeamMember } from "@/lib/teamBank";
+import { revertAssignmentsForMember } from "@/lib/session";
+import type { Filters, FilterStatus, TeamMember } from "@/lib/types";
 
 interface Props {
   filters: Filters;
@@ -9,6 +11,7 @@ interface Props {
   onChange: (filters: Filters) => void;
   resultCount: number;
   totalCount: number;
+  teamMembers: TeamMember[];
 }
 
 const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
@@ -23,7 +26,11 @@ export default function FilterBar({
   onChange,
   resultCount,
   totalCount,
+  teamMembers,
 }: Props) {
+  const [managingUsers, setManagingUsers] = useState(false);
+  const [newName, setNewName] = useState("");
+
   const hasActiveFilters =
     filters.status !== "all" || filters.section !== "" || filters.search !== "";
 
@@ -41,6 +48,18 @@ export default function FilterBar({
 
   function clearFilters() {
     onChange({ status: "all", section: "", search: "" });
+  }
+
+  function handleAddMember() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    addTeamMember(trimmed);
+    setNewName("");
+  }
+
+  function handleRemoveMember(memberId: string) {
+    removeTeamMember(memberId);
+    revertAssignmentsForMember(memberId);
   }
 
   return (
@@ -126,7 +145,64 @@ export default function FilterBar({
             </button>
           )}
         </div>
+
+        {/* Manage users toggle */}
+        <button
+          onClick={() => setManagingUsers((m) => !m)}
+          className={`
+            shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
+            ${managingUsers
+              ? "border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
+              : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+            }
+          `}
+        >
+          Manage Users
+        </button>
       </div>
+
+      {/* Manage users panel */}
+      {managingUsers && (
+        <div className="max-w-5xl mx-auto mt-3 flex flex-col gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddMember(); } }}
+              placeholder="Add team member name"
+              className="flex-1 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={handleAddMember}
+              disabled={!newName.trim()}
+              className="shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white transition-colors"
+            >
+              Add
+            </button>
+          </div>
+          {teamMembers.length > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {teamMembers.map((m) => (
+                <li key={m.id} className="flex items-center justify-between gap-2 text-sm text-gray-700 dark:text-gray-300 px-1">
+                  <span className="truncate">{m.name}</span>
+                  <button
+                    onClick={() => handleRemoveMember(m.id)}
+                    title="Remove from team bank"
+                    className="shrink-0 p-1 rounded text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-gray-400 dark:text-gray-500 px-1">No team members yet.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

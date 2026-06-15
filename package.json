@@ -13,7 +13,8 @@
     "firebase": "^12.14.0",
     "next": "^16.2.7",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "vanilla-framework": "^4.51.0"
   },
   "devDependencies": {
     "@types/node": "^20",

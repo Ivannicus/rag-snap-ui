@@ -15,8 +15,13 @@ import {
   clearRating,
   updateContextUrl,
   clearContextUrl,
+  updateAssignee,
+  clearAssignee,
+  updateReviewer,
+  clearReviewer,
 } from "@/lib/session";
-import type { ParsedQAFile, Filters, QAItem, SessionState } from "@/lib/types";
+import { subscribeToTeamMembers } from "@/lib/teamBank";
+import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
 
@@ -40,6 +45,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [contextUrls, setContextUrls] = useState<Record<string, string>>(
     () => initialState?.contextUrls ?? {}
   );
+  const [assignees, setAssignees] = useState<Record<string, string>>(
+    () => initialState?.assignees ?? {}
+  );
+  const [reviewers, setReviewers] = useState<Record<string, string>>(
+    () => initialState?.reviewers ?? {}
+  );
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Suppress own-write echo: track whether incoming RTDB update was triggered by us
@@ -56,6 +68,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   useEffect(() => {
     const stored = localStorage.getItem("darkMode");
     if (stored === "true") setDarkMode(true);
+  }, []);
+
+  // Subscribe to the global team member bank
+  useEffect(() => {
+    return subscribeToTeamMembers(setTeamMembers);
   }, []);
 
   // Join session from URL param on mount
@@ -76,6 +93,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       setEditedAnswers(state.editedAnswers);
       setRatings(state.ratings);
       setContextUrls(state.contextUrls);
+      setAssignees(state.assignees);
+      setReviewers(state.reviewers);
     });
 
     return unsubscribe;
@@ -95,6 +114,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers({});
     setRatings({});
     setContextUrls({});
+    setAssignees({});
+    setReviewers({});
   }, []);
 
   const handleSaveRating = useCallback((id: string, rating: number) => {
@@ -157,6 +178,46 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     }
   }, [sessionId]);
 
+  const handleSaveAssignee = useCallback((id: string, memberId: string) => {
+    setAssignees((prev) => ({ ...prev, [id]: memberId }));
+    if (sessionId) {
+      suppressNextUpdate.current = true;
+      updateAssignee(sessionId, id, memberId);
+    }
+  }, [sessionId]);
+
+  const handleClearAssignee = useCallback((id: string) => {
+    setAssignees((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (sessionId) {
+      suppressNextUpdate.current = true;
+      clearAssignee(sessionId, id);
+    }
+  }, [sessionId]);
+
+  const handleSaveReviewer = useCallback((id: string, memberId: string) => {
+    setReviewers((prev) => ({ ...prev, [id]: memberId }));
+    if (sessionId) {
+      suppressNextUpdate.current = true;
+      updateReviewer(sessionId, id, memberId);
+    }
+  }, [sessionId]);
+
+  const handleClearReviewer = useCallback((id: string) => {
+    setReviewers((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (sessionId) {
+      suppressNextUpdate.current = true;
+      clearReviewer(sessionId, id);
+    }
+  }, [sessionId]);
+
   const unansweredCount = useMemo(
     () =>
       data
@@ -198,7 +259,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const contextUrlCount = Object.keys(contextUrls).length;
 
   const currentSessionState: SessionState | null = data
-    ? { data, filename: filename ?? "", editedAnswers, ratings, contextUrls }
+    ? { data, filename: filename ?? "", editedAnswers, ratings, contextUrls, assignees, reviewers }
     : null;
 
   return (
@@ -242,6 +303,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
             onChange={setFilters}
             resultCount={filteredItems.length}
             totalCount={data.items.length}
+            teamMembers={teamMembers}
           />
 
           <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6">
@@ -276,6 +338,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                     contextUrls={contextUrls}
                     onSaveContextUrl={handleSaveContextUrl}
                     onClearContextUrl={handleClearContextUrl}
+                    assignees={assignees}
+                    onSaveAssignee={handleSaveAssignee}
+                    onClearAssignee={handleClearAssignee}
+                    reviewers={reviewers}
+                    onSaveReviewer={handleSaveReviewer}
+                    onClearReviewer={handleClearReviewer}
+                    teamMembers={teamMembers}
                   />
                 ))}
               </div>
