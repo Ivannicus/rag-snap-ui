@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import type { ParsedQAFile } from "@/lib/types";
 
 interface Props {
@@ -65,31 +65,17 @@ export default function ExportButton({ data, editedAnswers, ratings, contextUrls
   return (
     <button
       onClick={handleExport}
-      className={`
-        inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm
-        transition-all shadow-sm
-        ${exported
-          ? "bg-green-500 text-white"
-          : "bg-blue-600 hover:bg-blue-700 active:scale-95 text-white"
-        }
-      `}
+      className={`u-no-margin--bottom ${exported ? "p-button--positive" : "p-button--brand"}`}
     >
       {exported ? (
         <>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          Exported!
+          <i className="p-icon--success"></i> Exported!
         </>
       ) : (
         <>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Export CSV
+          <i className="p-icon--export"></i> Export CSV
           {(editCount > 0 || ratingCount > 0) && (
-            <span className="bg-white/20 text-xs px-1.5 py-0.5 rounded-full">
+            <span className="export-button__badge">
               {[
                 editCount > 0 && `${editCount} edit${editCount !== 1 ? "s" : ""}`,
                 ratingCount > 0 && `${ratingCount} rating${ratingCount !== 1 ? "s" : ""}`,
