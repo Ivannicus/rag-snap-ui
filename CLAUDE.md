@@ -80,12 +80,12 @@ page.tsx
 └── AuthGate — Firebase auth state listener
     ├── LoginScreen — Google Sign-In button (shown when unauthenticated)
     └── AppShell (all state) — shown when authenticated
-        ├── Header — sticky bar with FileLoader, file metadata, answered/unanswered counts, dark mode toggle
-        │   └── FileLoader — drag-and-drop or click-to-upload, calls parseQAFile
+        ├── Header — sticky bar with logo lockup, dark mode toggle, FileLoader, filename badge, answered/unanswered counts
+        │   ├── FileLoader — drag-and-drop or click-to-upload, calls parseQAFile
+        │   └── [Manage Users panel] — toggled by "Manage Users" button in the header; add/remove team bank members
         ├── [user bar] — shows signed-in email + sign out button
         ├── [live session banner] — shown when sessionId is set
         ├── FilterBar — status toggle, section dropdown, search input
-        │   └── [Manage Users panel] — toggled by "Manage Users" button; add/remove team bank members
         └── SectionGroup (per section)
             │   [assignee/reviewer indicator] — shows assigned name / "Reviewer: <name>" or "Unassigned" on the section header row, looked up from teamMembers via assignees/reviewers
             └── QuestionCard (per item)
@@ -98,9 +98,61 @@ page.tsx
             └── ExportButton — downloads CSV
 ```
 
-### Tailwind & dark mode
+### Vanilla Framework & dark mode
 
-Dark mode is class-based (`dark:` variants). The `"dark"` class is toggled on `<html>` via `useEffect` in `AppShell.tsx`. All components use Tailwind only — no CSS modules or styled-components.
+This project uses **Vanilla Framework v4.51.0** (migrated from Tailwind). The stylesheet entry point is `app/globals.scss`:
+
+```scss
+@use "vanilla-framework";
+@include vanilla-framework.vanilla;
+```
+
+Dark mode uses Vanilla's `is-dark` class on `<html>` (toggled via `useEffect` in `AppShell.tsx`), not Tailwind's `dark:` variants. All components use Vanilla Framework utility/pattern classes plus custom classes in `globals.scss` — no CSS modules, styled-components, or Tailwind.
+
+#### Vanilla Framework rules — read before touching CSS
+
+**1. Verify class names before use.**
+Always grep `node_modules/vanilla-framework/scss/` before using any `p-*` or `u-*` class. Do not guess — many classes look plausible but don't exist or behave differently than expected.
+
+**2. Specificity conflicts are the #1 source of "my change does nothing" bugs.**
+Vanilla's component selectors often use two classes (e.g. `.p-navigation__tagged-logo .p-navigation__logo-title`, specificity 0,2,0). A single custom class (e.g. `.app-logo-title`, specificity 0,1,0) loses regardless of source order. Fix pattern: **remove the conflicting Vanilla class from the element** so only your custom class applies, rather than trying to out-specify Vanilla.
+
+**3. SVG sizing: always set width AND height equally.**
+SVGs with a square `viewBox` use `preserveAspectRatio="xMidYMid meet"` by default. The icon content is constrained by the *smaller* dimension. Setting only `height` has no visible effect — the icon draws at the size of `width`. Always change both dimensions together.
+
+**4. `.p-navigation` layout internals.**
+- `.p-navigation` is `display: flex; flex-direction: column` (row at the navigation breakpoint), `position: relative` — it is the containing block for absolutely-positioned children.
+- `.p-navigation__row` extends `%fixed-width-container` (`max-width: 80rem`, `margin: auto`) and `%vf-reset-horizontal-padding` (padding reset to 0). On screens wider than 80rem the row is centered.
+- `%navigation-link` (extended by `.p-navigation__link`) sets `position: relative; overflow: hidden; width: 100%` — this will clip or missize any child you expect to flow normally. Override with `position: static; overflow: visible; width: auto` on a custom class applied to the same element.
+- `.p-navigation.is-sticky` adds `position: sticky; top: 0` — sticky also establishes a containing block for absolutely-positioned descendants.
+
+**5. Use `visibility: hidden` (not `display: none`) to hide placeholder elements.**
+`visibility: hidden` keeps the element in layout so the row height/width stays stable whether or not a file is loaded. The `.header-meta__hidden` utility class does this.
+
+#### Custom component patterns
+
+**Square badges (`.section-header__block`)** — the canonical non-pill badge style:
+```scss
+.section-header__block {
+  display: inline-flex; align-items: center;
+  height: 1.625rem; padding: 0 0.5rem;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  font-size: 0.875rem; white-space: nowrap;
+
+  &--positive { background: var(--vf-color-background-positive-default); border-color: var(--vf-color-border-positive); }
+  &--negative { background: var(--vf-color-background-negative-default); border-color: var(--vf-color-border-negative); }
+  &--caution  { background: var(--vf-color-background-caution-default);  border-color: var(--vf-color-border-caution); }
+}
+```
+Use `--positive` (green) for answered/success, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning.
+
+**Square buttons** — Vanilla buttons are rounded by default. To make them square like the "Load JSON file" button:
+```scss
+.file-loader__button {
+  border-radius: 0;
+  border-color: var(--vf-color-border-high-contrast);
+}
+```
 
 ## Environment variables
 
