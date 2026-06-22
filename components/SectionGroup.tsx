@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import QuestionCard from "./QuestionCard";
 import { isUnanswered } from "@/lib/utils";
 import type { QAItem, TeamMember } from "@/lib/types";
@@ -62,36 +61,38 @@ export default function SectionGroup({
   return (
     <div>
       {/* Section header */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-bold text-gray-900 dark:text-white">
-            Section {section}
+      <div className="section-header">
+        <span className="p-heading--5 u-no-margin--bottom">
+          Section {section}
+        </span>
+        <span className="section-header__block">
+          Assignee: {assigneeName}
+        </span>
+        <span className="section-header__block">
+          Reviewer: {reviewerName}
+        </span>
+        <span className="section-header__block">
+          {items.length} {items.length === 1 ? "question" : "questions"}
+        </span>
+        {unansweredCount > 0 ? (
+          <span className="section-header__block section-header__block--negative">
+            {items.length > 1 ? `${unansweredCount} Unanswered` : "Unanswered"}
           </span>
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-            Assignee: {assigneeName}
+        ) : (
+          <span className="section-header__block section-header__block--positive">
+            {items.length > 1 ? `${items.length} Answered` : "Answered"}
           </span>
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-            Reviewer: {reviewerName}
+        )}
+        {editedCount > 0 && (
+          <span className="section-header__block section-header__block--caution">
+            {editedCount} Edited
           </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
-            {items.length} {items.length === 1 ? "question" : "questions"}
-          </span>
-          {unansweredCount > 0 && (
-            <span className="text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 px-2 py-0.5 rounded-full">
-              {unansweredCount} unanswered
-            </span>
-          )}
-          {editedCount > 0 && (
-            <span className="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
-              {editedCount} edited
-            </span>
-          )}
-        </div>
-        <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+        )}
+        <div className="section-header__rule" />
       </div>
 
       {/* Question cards */}
-      <div className="flex flex-col gap-2">
+      <div className="section-cards">
         {items.map((item) => (
           <QuestionCard
             key={item.id}

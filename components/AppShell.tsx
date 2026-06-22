@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import Header from "@/components/Header";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
@@ -57,11 +57,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   // Suppress own-write echo: track whether incoming RTDB update was triggered by us
   const suppressNextUpdate = useRef(false);
 
-  // Sync dark mode class on <html>
+  // Sync Vanilla dark theme class on <html>
   useEffect(() => {
     const root = document.documentElement;
-    if (darkMode) root.classList.add("dark");
-    else root.classList.remove("dark");
+    if (darkMode) root.classList.add("is-dark");
+    else root.classList.remove("is-dark");
   }, [darkMode]);
 
   // Load persisted dark mode preference
@@ -263,7 +263,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     : null;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="app-shell">
       <Header
         data={data}
         filename={filename}
@@ -272,15 +272,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         onLoad={handleLoad}
         darkMode={darkMode}
         onToggleDark={toggleDark}
+        teamMembers={teamMembers}
       />
 
       {/* User bar */}
       {userEmail && (
-        <div className="bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-1.5 flex items-center justify-end gap-3 text-xs text-gray-500 dark:text-gray-400">
-          <span>{userEmail}</span>
+        <div className="user-bar">
+          <span className="u-text--muted p-text--small">{userEmail}</span>
           <button
             onClick={onSignOut}
-            className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+            className="p-button--link u-no-margin--bottom"
           >
             Sign out
           </button>
@@ -289,8 +290,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
       {/* Live session indicator */}
       {sessionId && (
-        <div className="bg-green-50 dark:bg-green-900/20 border-b border-green-200 dark:border-green-800 px-4 py-2 flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        <div className="live-session-banner">
+          <span className="live-session-banner__dot" />
           Live session — edits sync in real time
         </div>
       )}
@@ -303,26 +304,22 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
             onChange={setFilters}
             resultCount={filteredItems.length}
             totalCount={data.items.length}
-            teamMembers={teamMembers}
           />
 
-          <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6">
+          <main className="app-main">
             {grouped.length === 0 ? (
-              <div className="text-center py-20 text-gray-500 dark:text-gray-400">
-                <svg className="w-12 h-12 mx-auto mb-4 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-lg font-medium">No questions match your filters</p>
+              <div className="empty-state">
+                <i className="p-icon--search p-icon--xx-large u-text--muted"></i>
+                <p className="p-heading--4">No questions match your filters</p>
                 <button
                   onClick={() => setFilters(DEFAULT_FILTERS)}
-                  className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  className="p-button--link u-no-margin--bottom"
                 >
                   Clear all filters
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-8">
+              <div className="section-groups">
                 {grouped.map(({ section, items }) => (
                   <SectionGroup
                     key={section}
@@ -350,18 +347,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               </div>
             )}
 
-            <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="export-footer">
               <div>
-                <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                  Export results
+                <p className="u-no-margin--bottom">
+                  <strong>Export results</strong>
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <p className="u-text--muted p-text--small">
                   CSV with question, original answer, edited answer, context URL, and rating columns.
                   {editCount > 0 && ` ${editCount} edited answer${editCount !== 1 ? "s" : ""} included.`}
                   {contextUrlCount > 0 && ` ${contextUrlCount} context URL${contextUrlCount !== 1 ? "s" : ""} included.`}
                 </p>
               </div>
-              <div className="flex items-center gap-3 flex-wrap">
+              <div className="export-footer__actions">
                 {currentSessionState && !sessionId && (
                   <ShareButton sessionState={currentSessionState} />
                 )}
@@ -377,22 +374,15 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           </main>
         </>
       ) : (
-        <main className="flex-1 flex flex-col items-center justify-center px-4 py-20 text-center">
-          <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mb-6">
-            <svg className="w-10 h-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            No file loaded
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400 max-w-sm">
+        <main className="app-main no-file-state">
+          <i className="p-icon--file p-icon--xx-large"></i>
+          <h2 className="p-heading--2">No file loaded</h2>
+          <p className="u-text--muted">
             Use the file loader above to open a JSON results file and start exploring Q&amp;A pairs.
           </p>
-          <div className="mt-8 text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 max-w-sm text-sm text-gray-600 dark:text-gray-300">
-            <p className="font-semibold text-gray-800 dark:text-gray-100 mb-2">Expected JSON format:</p>
-            <pre className="text-xs font-mono text-gray-500 dark:text-gray-400 overflow-x-auto">{`{
+          <div className="p-card no-file-state__example">
+            <p><strong>Expected JSON format:</strong></p>
+            <pre className="u-no-margin--bottom">{`{
   "generated_at": "2026-04-09T...",
   "model": "model-name",
   "results": [
