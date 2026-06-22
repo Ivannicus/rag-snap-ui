@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-06-12T10:00:00Z",
+  "model": "test-model-v1",
+  "results": [
+    {
+      "id": "1.1",
+      "question": "What is the company's policy on remote work?",
+      "answer": "Employees may work remotely up to **3 days per week**, subject to manager approval.\n- Core hours are 10am-4pm local time\n- Remote work requests should be submitted via the HR portal"
+    },
+    {
+      "id": "1.2",
+      "question": "What equipment is provided for remote workers?",
+      "answer": "Remote workers are provided with a laptop, monitor, keyboard, and mouse.\n- Additional equipment can be requested through IT\n- Equipment must be returned upon termination of employment"
+    },
+    {
+      "id": "1.3",
+      "question": "Is there a stipend for home office setup?",
+      "answer": "The provided context does not contain information about a home office stipend."
+    },
+    {
+      "id": "2.1",
+      "question": "How do I request time off?",
+      "answer": "Time off requests are submitted through the HR portal at least **2 weeks in advance** for planned leave.\n- Sick leave can be requested retroactively\n- Manager approval is required for all requests"
+    },
+    {
+      "id": "2.2",
+      "question": "What is the parental leave policy?",
+      "answer": "The provided context does not contain information about parental leave policy."
+    },
+    {
+      "id": "3.1",
+      "question": "What expense categories are reimbursable?",
+      "answer": "Reimbursable categories include travel, accommodation, client meals, and approved software subscriptions.\n- Submit receipts within 30 days\n- Use the Expensify app for submissions"
+    },
+    {
+      "id": "3.2",
+      "question": "What is the per-diem rate for international travel?",
+      "answer": "The provided context does not contain information about per-diem rates for international travel."
+    }
+  ]
+}

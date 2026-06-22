@@ -32,4 +32,11 @@ export interface SessionState {
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
   contextUrls: Record<string, string>;
+  assignees: Record<string, string>; // item.id -> TeamMember.id
+  reviewers: Record<string, string>; // item.id -> TeamMember.id
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
 }

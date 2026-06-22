@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem } from "@/lib/types";
+import type { QAItem, TeamMember } from "@/lib/types";
 
 interface Props {
   item: QAItem;
@@ -16,6 +16,13 @@ interface Props {
   contextUrl?: string;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
+  assignee?: string;
+  onSaveAssignee: (id: string, memberId: string) => void;
+  onClearAssignee: (id: string) => void;
+  reviewer?: string;
+  onSaveReviewer: (id: string, memberId: string) => void;
+  onClearReviewer: (id: string) => void;
+  teamMembers: TeamMember[];
 }
 
 /** Highlight search term occurrences in text */
@@ -229,6 +236,72 @@ function ContextUrlRow({
   );
 }
 
+function AssignmentRow({
+  assignee,
+  reviewer,
+  teamMembers,
+  onSaveAssignee,
+  onClearAssignee,
+  onSaveReviewer,
+  onClearReviewer,
+}: {
+  assignee?: string;
+  reviewer?: string;
+  teamMembers: TeamMember[];
+  onSaveAssignee: (memberId: string) => void;
+  onClearAssignee: () => void;
+  onSaveReviewer: (memberId: string) => void;
+  onClearReviewer: () => void;
+}) {
+  function handleAssigneeChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const value = e.target.value;
+    if (value) onSaveAssignee(value);
+    else onClearAssignee();
+  }
+
+  function handleReviewerChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const value = e.target.value;
+    if (value) onSaveReviewer(value);
+    else onClearReviewer();
+  }
+
+  const selectClass =
+    "text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <label className="flex items-center gap-1.5 text-xs">
+        <span className="text-gray-500 dark:text-gray-400">Assignee:</span>
+        <select
+          value={assignee ?? ""}
+          onChange={handleAssigneeChange}
+          onClick={(e) => e.stopPropagation()}
+          className={selectClass}
+        >
+          <option value="">Unassigned</option>
+          {teamMembers.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-1.5 text-xs">
+        <span className="text-gray-500 dark:text-gray-400">Reviewer:</span>
+        <select
+          value={reviewer ?? ""}
+          onChange={handleReviewerChange}
+          onClick={(e) => e.stopPropagation()}
+          className={selectClass}
+        >
+          <option value="">Unassigned</option>
+          {teamMembers.map((m) => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 export default function QuestionCard({
   item,
   searchTerm = "",
@@ -241,6 +314,13 @@ export default function QuestionCard({
   contextUrl,
   onSaveContextUrl,
   onClearContextUrl,
+  assignee,
+  onSaveAssignee,
+  onClearAssignee,
+  reviewer,
+  onSaveReviewer,
+  onClearReviewer,
+  teamMembers,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -464,6 +544,22 @@ export default function QuestionCard({
               </button>
             )
           )}
+
+          {/* ── Assignment ── */}
+          <div className="pt-1 border-t border-gray-100 dark:border-gray-700">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
+              Assignment
+            </p>
+            <AssignmentRow
+              assignee={assignee}
+              reviewer={reviewer}
+              teamMembers={teamMembers}
+              onSaveAssignee={(memberId) => onSaveAssignee(item.id, memberId)}
+              onClearAssignee={() => onClearAssignee(item.id)}
+              onSaveReviewer={(memberId) => onSaveReviewer(item.id, memberId)}
+              onClearReviewer={() => onClearReviewer(item.id)}
+            />
+          </div>
 
           {/* ── Context URL — only for originally unanswered questions ── */}
           {unanswered && (

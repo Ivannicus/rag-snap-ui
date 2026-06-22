@@ -1,4 +1,4 @@
-import { ref, set, update, remove, onValue, off } from 'firebase/database';
+import { ref, set, update, remove, onValue, off, get } from 'firebase/database';
 import { db } from './firebase';
 import type { SessionState } from './types';
 
@@ -10,6 +10,8 @@ export async function createSession(state: SessionState): Promise<string> {
     editedAnswers: state.editedAnswers,
     ratings: state.ratings,
     contextUrls: state.contextUrls,
+    assignees: state.assignees,
+    reviewers: state.reviewers,
     createdAt: Date.now(),
   });
   return sessionId;
@@ -29,6 +31,8 @@ export function subscribeToSession(
         editedAnswers: val.editedAnswers ?? {},
         ratings: val.ratings ?? {},
         contextUrls: val.contextUrls ?? {},
+        assignees: val.assignees ?? {},
+        reviewers: val.reviewers ?? {},
       });
     }
   });
@@ -57,4 +61,48 @@ export function updateContextUrl(sessionId: string, itemId: string, url: string)
 
 export function clearContextUrl(sessionId: string, itemId: string) {
   return remove(ref(db, `sessions/${sessionId}/contextUrls/${itemId}`));
+}
+
+export function updateAssignee(sessionId: string, itemId: string, memberId: string) {
+  return update(ref(db, `sessions/${sessionId}/assignees`), { [itemId]: memberId });
+}
+
+export function clearAssignee(sessionId: string, itemId: string) {
+  return remove(ref(db, `sessions/${sessionId}/assignees/${itemId}`));
+}
+
+export function updateReviewer(sessionId: string, itemId: string, memberId: string) {
+  return update(ref(db, `sessions/${sessionId}/reviewers`), { [itemId]: memberId });
+}
+
+export function clearReviewer(sessionId: string, itemId: string) {
+  return remove(ref(db, `sessions/${sessionId}/reviewers/${itemId}`));
+}
+
+/**
+ * When a team member is deleted from the bank, revert any assignee/reviewer
+ * references to that member back to unassigned across all active sessions.
+ */
+export async function revertAssignmentsForMember(memberId: string): Promise<void> {
+  const snapshot = await get(ref(db, 'sessions'));
+  const sessions = snapshot.val();
+  if (!sessions) return;
+
+  const updates: Record<string, null> = {};
+  for (const [sessionId, session] of Object.entries(sessions as Record<string, any>)) {
+    for (const [itemId, assigneeId] of Object.entries(session.assignees ?? {})) {
+      if (assigneeId === memberId) {
+        updates[`sessions/${sessionId}/assignees/${itemId}`] = null;
+      }
+    }
+    for (const [itemId, reviewerId] of Object.entries(session.reviewers ?? {})) {
+      if (reviewerId === memberId) {
+        updates[`sessions/${sessionId}/reviewers/${itemId}`] = null;
+      }
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await update(ref(db), updates);
+  }
 }
