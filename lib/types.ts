@@ -37,6 +37,8 @@ export interface SessionState {
 }
 
 export interface TeamMember {
-  id: string;
+  id: string; // sanitized email, e.g. "alice@canonical_com"
   name: string;
+  email: string;
+  photoURL?: string;
 }

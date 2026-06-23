@@ -278,7 +278,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       {/* User bar */}
       {userEmail && (
         <div className="user-bar">
-          <span className="u-text--muted p-text--small">{userEmail}</span>
+          <span className="u-text--muted p-text--small u-no-margin--bottom">{userEmail}</span>
           <button
             onClick={onSignOut}
             className="p-button--link u-no-margin--bottom"
