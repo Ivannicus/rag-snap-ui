@@ -42,3 +42,12 @@ export interface TeamMember {
   email: string;
   photoURL?: string;
 }
+
+export interface SavedFile {
+  id: string;
+  filename: string;
+  data: ParsedQAFile;
+  uploadedByName: string;
+  uploadedByEmail: string;
+  uploadedAt: number;
+}
