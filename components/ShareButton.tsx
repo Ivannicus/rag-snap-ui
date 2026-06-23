@@ -21,9 +21,7 @@ export default function ShareButton({ sessionState }: Props) {
       const sessionId = await createSession(sessionState);
       const url = `${window.location.origin}?session=${sessionId}`;
       await navigator.clipboard.writeText(url);
-      setShareUrl(url);
-      setStatus("success");
-      setTimeout(() => setStatus("idle"), 6000);
+      window.location.href = url;
     } catch {
       setStatus("error");
       setTimeout(() => setStatus("idle"), 3000);

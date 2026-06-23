@@ -7,6 +7,8 @@ import { addTeamMember, removeTeamMember } from "@/lib/teamBank";
 import { revertAssignmentsForMember } from "@/lib/session";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
 
+export type ActiveView = "inspector" | "database";
+
 interface Props {
   data: ParsedQAFile | null;
   filename: string | null;
@@ -16,6 +18,8 @@ interface Props {
   darkMode: boolean;
   onToggleDark: () => void;
   teamMembers: TeamMember[];
+  activeView: ActiveView;
+  onChangeView: (view: ActiveView) => void;
 }
 
 export default function Header({
@@ -27,6 +31,8 @@ export default function Header({
   darkMode,
   onToggleDark,
   teamMembers,
+  activeView,
+  onChangeView,
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
@@ -78,6 +84,28 @@ export default function Header({
       </div>
 
       <div className="p-navigation__row">
+        <div className="header-meta">
+          {/* View toggle */}
+          <div className="header-meta__left">
+            <div className="view-toggle">
+              <button
+                onClick={() => onChangeView("inspector")}
+                className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "inspector" ? "p-button--brand" : "p-button--base"}`}
+              >
+                File Inspector
+              </button>
+              <button
+                onClick={() => onChangeView("database")}
+                className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "database" ? "p-button--brand" : "p-button--base"}`}
+              >
+                RFP Database
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={`p-navigation__row ${activeView === "database" ? "header-meta__hidden" : ""}`}>
         <div className="header-meta">
           {/* Left group: Manage Users + Load JSON + filename badge — always on one line */}
           <div className="header-meta__left">

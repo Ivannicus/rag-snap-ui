@@ -2,6 +2,8 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import Header from "@/components/Header";
+import type { ActiveView } from "@/components/Header";
+import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
 import ExportButton from "@/components/ExportButton";
@@ -53,6 +55,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>("inspector");
 
   // Suppress own-write echo: track whether incoming RTDB update was triggered by us
   const suppressNextUpdate = useRef(false);
@@ -273,6 +276,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         darkMode={darkMode}
         onToggleDark={toggleDark}
         teamMembers={teamMembers}
+        activeView={activeView}
+        onChangeView={setActiveView}
       />
 
       {/* User bar */}
@@ -288,101 +293,105 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         </div>
       )}
 
-      {/* Live session indicator */}
-      {sessionId && (
-        <div className="live-session-banner">
-          <span className="live-session-banner__dot" />
-          Live session — edits sync in real time
-        </div>
-      )}
-
-      {data ? (
-        <>
-          <FilterBar
-            filters={filters}
-            sections={allSections}
-            onChange={setFilters}
-            resultCount={filteredItems.length}
-            totalCount={data.items.length}
-          />
-
-          <main className="app-main">
-            {grouped.length === 0 ? (
-              <div className="empty-state">
-                <i className="p-icon--search p-icon--xx-large u-text--muted"></i>
-                <p className="p-heading--4">No questions match your filters</p>
-                <button
-                  onClick={() => setFilters(DEFAULT_FILTERS)}
-                  className="p-button--link u-no-margin--bottom"
-                >
-                  Clear all filters
-                </button>
-              </div>
-            ) : (
-              <div className="section-groups">
-                {grouped.map(({ section, items }) => (
-                  <SectionGroup
-                    key={section}
-                    section={section}
-                    items={items}
-                    searchTerm={filters.search}
-                    editedAnswers={editedAnswers}
-                    onSaveEdit={handleSaveEdit}
-                    onClearEdit={handleClearEdit}
-                    ratings={ratings}
-                    onSaveRating={handleSaveRating}
-                    onClearRating={handleClearRating}
-                    contextUrls={contextUrls}
-                    onSaveContextUrl={handleSaveContextUrl}
-                    onClearContextUrl={handleClearContextUrl}
-                    assignees={assignees}
-                    onSaveAssignee={handleSaveAssignee}
-                    onClearAssignee={handleClearAssignee}
-                    reviewers={reviewers}
-                    onSaveReviewer={handleSaveReviewer}
-                    onClearReviewer={handleClearReviewer}
-                    teamMembers={teamMembers}
-                  />
-                ))}
-              </div>
-            )}
-
-            <div className="export-footer">
-              <div>
-                <p className="u-no-margin--bottom">
-                  <strong>Export results</strong>
-                </p>
-                <p className="u-text--muted p-text--small">
-                  CSV with question, original answer, edited answer, context URL, and rating columns.
-                  {editCount > 0 && ` ${editCount} edited answer${editCount !== 1 ? "s" : ""} included.`}
-                  {contextUrlCount > 0 && ` ${contextUrlCount} context URL${contextUrlCount !== 1 ? "s" : ""} included.`}
-                </p>
-              </div>
-              <div className="export-footer__actions">
-                {currentSessionState && !sessionId && (
-                  <ShareButton sessionState={currentSessionState} />
-                )}
-                <ExportButton
-                  data={data}
-                  editedAnswers={editedAnswers}
-                  ratings={ratings}
-                  contextUrls={contextUrls}
-                  sourceFilename={filename}
-                />
-              </div>
-            </div>
-          </main>
-        </>
+      {activeView === "database" ? (
+        <RfpDatabaseView />
       ) : (
-        <main className="app-main no-file-state">
-          <i className="p-icon--file p-icon--xx-large"></i>
-          <h2 className="p-heading--2">No file loaded</h2>
-          <p className="u-text--muted">
-            Use the file loader above to open a JSON results file and start exploring Q&amp;A pairs.
-          </p>
-          <div className="p-card no-file-state__example">
-            <p><strong>Expected JSON format:</strong></p>
-            <pre className="u-no-margin--bottom">{`{
+        <>
+          {/* Live session indicator */}
+          {sessionId && (
+            <div className="live-session-banner">
+              <span className="live-session-banner__dot" />
+              Live session — edits sync in real time
+            </div>
+          )}
+
+          {data ? (
+            <>
+              <FilterBar
+                filters={filters}
+                sections={allSections}
+                onChange={setFilters}
+                resultCount={filteredItems.length}
+                totalCount={data.items.length}
+              />
+
+              <main className="app-main">
+                {grouped.length === 0 ? (
+                  <div className="empty-state">
+                    <i className="p-icon--search p-icon--xx-large u-text--muted"></i>
+                    <p className="p-heading--4">No questions match your filters</p>
+                    <button
+                      onClick={() => setFilters(DEFAULT_FILTERS)}
+                      className="p-button--link u-no-margin--bottom"
+                    >
+                      Clear all filters
+                    </button>
+                  </div>
+                ) : (
+                  <div className="section-groups">
+                    {grouped.map(({ section, items }) => (
+                      <SectionGroup
+                        key={section}
+                        section={section}
+                        items={items}
+                        searchTerm={filters.search}
+                        editedAnswers={editedAnswers}
+                        onSaveEdit={handleSaveEdit}
+                        onClearEdit={handleClearEdit}
+                        ratings={ratings}
+                        onSaveRating={handleSaveRating}
+                        onClearRating={handleClearRating}
+                        contextUrls={contextUrls}
+                        onSaveContextUrl={handleSaveContextUrl}
+                        onClearContextUrl={handleClearContextUrl}
+                        assignees={assignees}
+                        onSaveAssignee={handleSaveAssignee}
+                        onClearAssignee={handleClearAssignee}
+                        reviewers={reviewers}
+                        onSaveReviewer={handleSaveReviewer}
+                        onClearReviewer={handleClearReviewer}
+                        teamMembers={teamMembers}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <div className="export-footer">
+                  <div>
+                    <p className="u-no-margin--bottom">
+                      <strong>Export results</strong>
+                    </p>
+                    <p className="u-text--muted p-text--small">
+                      CSV with question, original answer, edited answer, context URL, and rating columns.
+                      {editCount > 0 && ` ${editCount} edited answer${editCount !== 1 ? "s" : ""} included.`}
+                      {contextUrlCount > 0 && ` ${contextUrlCount} context URL${contextUrlCount !== 1 ? "s" : ""} included.`}
+                    </p>
+                  </div>
+                  <div className="export-footer__actions">
+                    {currentSessionState && !sessionId && (
+                      <ShareButton sessionState={currentSessionState} />
+                    )}
+                    <ExportButton
+                      data={data}
+                      editedAnswers={editedAnswers}
+                      ratings={ratings}
+                      contextUrls={contextUrls}
+                      sourceFilename={filename}
+                    />
+                  </div>
+                </div>
+              </main>
+            </>
+          ) : (
+            <main className="app-main no-file-state">
+              <i className="p-icon--file p-icon--xx-large"></i>
+              <h2 className="p-heading--2">No file loaded</h2>
+              <p className="u-text--muted">
+                Use the file loader above to open a JSON results file and start exploring Q&amp;A pairs.
+              </p>
+              <div className="p-card no-file-state__example">
+                <p><strong>Expected JSON format:</strong></p>
+                <pre className="u-no-margin--bottom">{`{
   "generated_at": "2026-04-09T...",
   "model": "model-name",
   "results": [
@@ -393,8 +402,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     }
   ]
 }`}</pre>
-          </div>
-        </main>
+              </div>
+            </main>
+          )}
+        </>
       )}
     </div>
   );

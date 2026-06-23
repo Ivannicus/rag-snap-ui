@@ -40,3 +40,12 @@ export interface TeamMember {
   id: string;
   name: string;
 }
+
+export interface RfpRecord {
+  id: string;
+  question: string;
+  answer: string;
+  source: string;
+  rfpDate: string;
+  importedAt: number;
+}
