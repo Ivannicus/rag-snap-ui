@@ -642,3 +642,63 @@
   gap: 0.25rem;
   color: var(--vf-color-border-negative);
 }
+
+.view-toggle {
+  display: flex;
+  gap: 0;
+
+  button {
+    border-radius: 0;
+  }
+}
+
+.rfp-database-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.rfp-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.rfp-search-bar__input-wrap {
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.rfp-search-bar__date {
+  flex-shrink: 0;
+  width: auto;
+  min-width: 10rem;
+}
+
+.rfp-results-list__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.rfp-result-card__question {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.rfp-result-card__answer {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rfp-result-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}

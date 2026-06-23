@@ -34,13 +34,29 @@ export function parseQAFile(json: unknown): ParsedQAFile {
     throw new Error('Missing or empty "results" array.');
   }
 
+  const duplicateIds = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const item of rawItems) {
+      if (seen.has(item.id)) duplicateIds.add(item.id);
+      else seen.add(item.id);
+    }
+  }
+
+  const idCounts = new Map<string, number>();
   const items: QAItem[] = rawItems.map((item, idx) => {
     if (!item.id || !item.question || item.answer === undefined) {
       throw new Error(
         `Item at index ${idx} is missing "id", "question", or "answer".`
       );
     }
-    return { id: item.id, question: item.question, answer: item.answer };
+    let id: string = item.id;
+    if (duplicateIds.has(id)) {
+      const count = (idCounts.get(id) ?? 0) + 1;
+      idCounts.set(id, count);
+      id = `${id}.${count}`;
+    }
+    return { id, question: item.question, answer: item.answer };
   });
 
   return { generated_at: obj.generated_at, model: obj.model, items };

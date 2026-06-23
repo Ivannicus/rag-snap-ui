@@ -6,6 +6,8 @@ import { removeTeamMember } from "@/lib/teamBank";
 import { revertAssignmentsForMember } from "@/lib/session";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
 
+export type ActiveView = "inspector" | "database";
+
 interface Props {
   data: ParsedQAFile | null;
   filename: string | null;
@@ -15,6 +17,8 @@ interface Props {
   darkMode: boolean;
   onToggleDark: () => void;
   teamMembers: TeamMember[];
+  activeView: ActiveView;
+  onChangeView: (view: ActiveView) => void;
 }
 
 export default function Header({
@@ -26,6 +30,8 @@ export default function Header({
   darkMode,
   onToggleDark,
   teamMembers,
+  activeView,
+  onChangeView,
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
@@ -140,6 +146,22 @@ export default function Header({
             <span className={`section-header__block ${data ? "" : "header-meta__hidden"}`}>
               {filename || "filename.json"}
             </span>
+          </div>
+
+          {/* View toggle */}
+          <div className="view-toggle">
+            <button
+              onClick={() => onChangeView("inspector")}
+              className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "inspector" ? "p-button--brand" : "p-button--base"}`}
+            >
+              File Inspector
+            </button>
+            <button
+              onClick={() => onChangeView("database")}
+              className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "database" ? "p-button--brand" : "p-button--base"}`}
+            >
+              RFP Database
+            </button>
           </div>
 
           {/* Right group: stats — pushed to right edge */}

@@ -51,3 +51,12 @@ export interface SavedFile {
   uploadedByEmail: string;
   uploadedAt: number;
 }
+
+export interface RfpRecord {
+  id: string;
+  question: string;
+  answer: string;
+  source: string;
+  rfpDate: string;
+  importedAt: number;
+}

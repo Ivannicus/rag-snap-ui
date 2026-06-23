@@ -2,16 +2,37 @@ import { ref, set, update, remove, onValue, off, get } from 'firebase/database';
 import { db } from './firebase';
 import type { SessionState } from './types';
 
+// Firebase RTDB forbids "." in keys. Encode/decode so item IDs like "1.1" survive round-trips.
+function encodeKey(key: string): string {
+  return key.replace(/\./g, '%2E');
+}
+
+function decodeKey(key: string): string {
+  return key.replace(/%2E/g, '.');
+}
+
+function encodeKeys<T>(map: Record<string, T>): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [k, v] of Object.entries(map)) out[encodeKey(k)] = v;
+  return out;
+}
+
+function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const [k, v] of Object.entries(map)) out[decodeKey(k)] = v;
+  return out;
+}
+
 export async function createSession(state: SessionState): Promise<string> {
   const sessionId = crypto.randomUUID();
   await set(ref(db, `sessions/${sessionId}`), {
     data: state.data,
     filename: state.filename,
-    editedAnswers: state.editedAnswers,
-    ratings: state.ratings,
-    contextUrls: state.contextUrls,
-    assignees: state.assignees,
-    reviewers: state.reviewers,
+    editedAnswers: encodeKeys(state.editedAnswers),
+    ratings: encodeKeys(state.ratings),
+    contextUrls: encodeKeys(state.contextUrls),
+    assignees: encodeKeys(state.assignees),
+    reviewers: encodeKeys(state.reviewers),
     createdAt: Date.now(),
   });
   return sessionId;
@@ -28,11 +49,11 @@ export function subscribeToSession(
       onUpdate({
         data: val.data,
         filename: val.filename ?? '',
-        editedAnswers: val.editedAnswers ?? {},
-        ratings: val.ratings ?? {},
-        contextUrls: val.contextUrls ?? {},
-        assignees: val.assignees ?? {},
-        reviewers: val.reviewers ?? {},
+        editedAnswers: decodeKeys(val.editedAnswers ?? {}),
+        ratings: decodeKeys(val.ratings ?? {}),
+        contextUrls: decodeKeys(val.contextUrls ?? {}),
+        assignees: decodeKeys(val.assignees ?? {}),
+        reviewers: decodeKeys(val.reviewers ?? {}),
       });
     }
   });
@@ -40,43 +61,43 @@ export function subscribeToSession(
 }
 
 export function updateAnswer(sessionId: string, itemId: string, answer: string) {
-  return update(ref(db, `sessions/${sessionId}/editedAnswers`), { [itemId]: answer });
+  return update(ref(db, `sessions/${sessionId}/editedAnswers`), { [encodeKey(itemId)]: answer });
 }
 
 export function clearAnswer(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/editedAnswers/${itemId}`));
+  return remove(ref(db, `sessions/${sessionId}/editedAnswers/${encodeKey(itemId)}`));
 }
 
 export function updateRating(sessionId: string, itemId: string, rating: number) {
-  return update(ref(db, `sessions/${sessionId}/ratings`), { [itemId]: rating });
+  return update(ref(db, `sessions/${sessionId}/ratings`), { [encodeKey(itemId)]: rating });
 }
 
 export function clearRating(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/ratings/${itemId}`));
+  return remove(ref(db, `sessions/${sessionId}/ratings/${encodeKey(itemId)}`));
 }
 
 export function updateContextUrl(sessionId: string, itemId: string, url: string) {
-  return update(ref(db, `sessions/${sessionId}/contextUrls`), { [itemId]: url });
+  return update(ref(db, `sessions/${sessionId}/contextUrls`), { [encodeKey(itemId)]: url });
 }
 
 export function clearContextUrl(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/contextUrls/${itemId}`));
+  return remove(ref(db, `sessions/${sessionId}/contextUrls/${encodeKey(itemId)}`));
 }
 
 export function updateAssignee(sessionId: string, itemId: string, memberId: string) {
-  return update(ref(db, `sessions/${sessionId}/assignees`), { [itemId]: memberId });
+  return update(ref(db, `sessions/${sessionId}/assignees`), { [encodeKey(itemId)]: memberId });
 }
 
 export function clearAssignee(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/assignees/${itemId}`));
+  return remove(ref(db, `sessions/${sessionId}/assignees/${encodeKey(itemId)}`));
 }
 
 export function updateReviewer(sessionId: string, itemId: string, memberId: string) {
-  return update(ref(db, `sessions/${sessionId}/reviewers`), { [itemId]: memberId });
+  return update(ref(db, `sessions/${sessionId}/reviewers`), { [encodeKey(itemId)]: memberId });
 }
 
 export function clearReviewer(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/reviewers/${itemId}`));
+  return remove(ref(db, `sessions/${sessionId}/reviewers/${encodeKey(itemId)}`));
 }
 
 /**

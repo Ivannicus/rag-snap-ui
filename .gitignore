@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 .env.*.local
+service-account*.json
 
 # Misc
 .DS_Store
