@@ -145,19 +145,19 @@ export default function Header({
           {/* Right group: stats — pushed to right edge */}
           <div className={`header-meta__right ${data ? "" : "header-meta__hidden"}`}>
             <span className="p-chip p-chip--positive u-no-margin--bottom">
-              <span className="p-chip__value">{answeredCount} answered</span>
+              <span className="p-chip__value">{answeredCount} Answered</span>
             </span>
             {unansweredCount > 0 ? (
               <span className="p-chip p-chip--negative u-no-margin--bottom">
-                <span className="p-chip__value">{unansweredCount} unanswered</span>
+                <span className="p-chip__value">{unansweredCount} Unanswered</span>
               </span>
             ) : (
               <span className="p-chip p-chip--information u-no-margin--bottom">
-                <span className="p-chip__value">All answered!</span>
+                <span className="p-chip__value">All Answered!</span>
               </span>
             )}
             <span className="u-text--muted p-text--small u-no-margin--bottom">
-              {totalCount} total
+              {totalCount} Total
             </span>
           </div>
         </div>

@@ -50,6 +50,7 @@ export default function SectionGroup({
   const unansweredCount = items.filter(
     (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
   ).length;
+  const answeredCount = items.length - unansweredCount;
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
   const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
@@ -72,15 +73,16 @@ export default function SectionGroup({
           Reviewer: {reviewerName}
         </span>
         <span className="section-header__block">
-          {items.length} {items.length === 1 ? "question" : "questions"}
+          {items.length} {items.length === 1 ? "Question" : "Questions"}
         </span>
-        {unansweredCount > 0 ? (
-          <span className="section-header__block section-header__block--negative">
-            {items.length > 1 ? `${unansweredCount} Unanswered` : "Unanswered"}
-          </span>
-        ) : (
+        {answeredCount > 0 && (
           <span className="section-header__block section-header__block--positive">
-            {items.length > 1 ? `${items.length} Answered` : "Answered"}
+            {answeredCount} Answered
+          </span>
+        )}
+        {unansweredCount > 0 && (
+          <span className="section-header__block section-header__block--negative">
+            {unansweredCount} Unanswered
           </span>
         )}
         {editedCount > 0 && (
