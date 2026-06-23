@@ -9,6 +9,10 @@
     "teamMembers": {
       ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
       ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
+    },
+    "rfpDatabase": {
+      ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
+      ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
     }
   }
 }
