@@ -22,8 +22,16 @@ export type FilterStatus = "all" | "answered" | "unanswered";
 
 export interface Filters {
   status: FilterStatus;
-  section: string; // "" means all sections
+  // "" = all sections; a plain section number (e.g. "1") = that section;
+  // "assignee:<TeamMember.id>" / "reviewer:<TeamMember.id>" = sections containing
+  // at least one item where that member is the assignee/reviewer
+  section: string;
   search: string;
+}
+
+export interface PersonFilterOption {
+  value: string;
+  label: string;
 }
 
 export interface SessionState {

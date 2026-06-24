@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import Header from "@/components/Header";
 import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
@@ -23,7 +23,7 @@ import {
   clearReviewer,
 } from "@/lib/session";
 import { subscribeToTeamMembers } from "@/lib/teamBank";
-import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember } from "@/lib/types";
+import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
 
@@ -56,9 +56,28 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("inspector");
+  const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
 
   // Suppress own-write echo: track whether incoming RTDB update was triggered by us
   const suppressNextUpdate = useRef(false);
+
+  // Per-view scroll position, restored when switching back
+  const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
+
+  function handleChangeView(view: ActiveView) {
+    scrollPositions.current[activeView] = window.scrollY;
+    setActiveView(view);
+  }
+
+  // Mount the RFP Database view on first visit, then keep it mounted (never unmount again)
+  useEffect(() => {
+    if (activeView === "database") setHasVisitedDatabase(true);
+  }, [activeView]);
+
+  // Restore the new view's scroll position after the DOM updates, before paint
+  useLayoutEffect(() => {
+    window.scrollTo(0, scrollPositions.current[activeView]);
+  }, [activeView]);
 
   // Sync Vanilla dark theme class on <html>
   useEffect(() => {
@@ -236,17 +255,76 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     [data]
   );
 
+  // Per-person filter options, computed dynamically from who actually has
+  // assignments/reviews in the currently loaded file (not the full team bank).
+  const personFilterOptions = useMemo((): PersonFilterOption[] => {
+    if (!data) return [];
+
+    function distinctMemberIds(roleMap: Record<string, string>): Set<string> {
+      const ids = new Set<string>();
+      for (const item of data!.items) {
+        const id = roleMap[item.id];
+        if (id) ids.add(id);
+      }
+      return ids;
+    }
+
+    function toOptions(
+      ids: Set<string>,
+      prefix: string,
+      suffix: string
+    ): PersonFilterOption[] {
+      return Array.from(ids)
+        .map((id) => teamMembers.find((m) => m.id === id))
+        .filter((m): m is TeamMember => m !== undefined)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((m) => ({ value: `${prefix}:${m.id}`, label: `${m.name}'s ${suffix}` }));
+    }
+
+    return [
+      ...toOptions(distinctMemberIds(assignees), "assignee", "Assignments"),
+      ...toOptions(distinctMemberIds(reviewers), "reviewer", "Reviews"),
+    ];
+  }, [data, assignees, reviewers, teamMembers]);
+
+  // If the active person-filter's option disappears (e.g. their last assignment
+  // was cleared), fall back to "All sections" rather than silently showing nothing.
+  useEffect(() => {
+    const { section } = filters;
+    if (!section.startsWith("assignee:") && !section.startsWith("reviewer:")) return;
+    const stillValid = personFilterOptions.some((opt) => opt.value === section);
+    if (!stillValid) {
+      setFilters((prev) => ({ ...prev, section: "" }));
+    }
+  }, [personFilterOptions, filters.section]);
+
   const filteredItems = useMemo((): QAItem[] => {
     if (!data) return [];
     const { status, section, search } = filters;
     const term = search.toLowerCase();
+
+    let matchingSections: Set<string> | null = null;
+    if (section.startsWith("assignee:") || section.startsWith("reviewer:")) {
+      const [kind, memberId] = section.split(":", 2);
+      const roleMap = kind === "assignee" ? assignees : reviewers;
+      matchingSections = new Set(
+        data.items
+          .filter((i) => roleMap[i.id] === memberId)
+          .map((i) => i.id.split(".")[0])
+      );
+    }
+
     return data.items.filter((item) => {
       const effectiveAnswer = editedAnswers[item.id] ?? item.answer;
       const effectivelyUnanswered =
         isUnanswered(item.answer) && !editedAnswers[item.id];
       if (status === "answered" && effectivelyUnanswered) return false;
       if (status === "unanswered" && !effectivelyUnanswered) return false;
-      if (section && item.id.split(".")[0] !== section) return false;
+      if (matchingSections) {
+        if (!matchingSections.has(item.id.split(".")[0])) return false;
+      } else if (section && item.id.split(".")[0] !== section) {
+        return false;
+      }
       if (term) {
         const inQ = item.question.toLowerCase().includes(term);
         const inA = effectiveAnswer.toLowerCase().includes(term);
@@ -254,7 +332,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers]);
+  }, [data, filters, editedAnswers, assignees, reviewers]);
 
   const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
 
@@ -277,7 +355,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         onToggleDark={toggleDark}
         teamMembers={teamMembers}
         activeView={activeView}
-        onChangeView={setActiveView}
+        onChangeView={handleChangeView}
       />
 
       {/* User bar */}
@@ -293,10 +371,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         </div>
       )}
 
-      {activeView === "database" ? (
-        <RfpDatabaseView />
-      ) : (
-        <>
+      <div className={activeView === "database" ? "u-hide" : ""}>
           {/* Live session indicator */}
           {sessionId && (
             <div className="live-session-banner">
@@ -310,6 +385,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               <FilterBar
                 filters={filters}
                 sections={allSections}
+                personFilterOptions={personFilterOptions}
                 onChange={setFilters}
                 resultCount={filteredItems.length}
                 totalCount={data.items.length}
@@ -405,7 +481,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               </div>
             </main>
           )}
-        </>
+      </div>
+
+      {hasVisitedDatabase && (
+        <div className={activeView === "inspector" ? "u-hide" : ""}>
+          <RfpDatabaseView />
+        </div>
       )}
     </div>
   );

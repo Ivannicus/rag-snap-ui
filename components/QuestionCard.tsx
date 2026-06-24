@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import TeamMemberSelect from "./TeamMemberSelect";
 import { isUnanswered } from "@/lib/utils";
 import type { QAItem, TeamMember } from "@/lib/types";
 
@@ -97,7 +98,7 @@ function StarRating({
 
   return (
     <div className="star-rating">
-      <span className="u-text--muted p-text--small">Rate:</span>
+      <span className="u-text--muted p-text--small u-no-margin--bottom">Rate:</span>
       {[1, 2, 3, 4, 5].map((star) => (
         <button
           key={star}
@@ -117,7 +118,7 @@ function StarRating({
         </button>
       ))}
       {rating !== undefined && (
-        <span className="star-rating__value p-text--small">
+        <span className="star-rating__value p-text--small u-no-margin--bottom">
           {rating}/5
         </span>
       )}
@@ -236,48 +237,22 @@ function AssignmentRow({
   onSaveReviewer: (memberId: string) => void;
   onClearReviewer: () => void;
 }) {
-  function handleAssigneeChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const value = e.target.value;
-    if (value) onSaveAssignee(value);
-    else onClearAssignee();
-  }
-
-  function handleReviewerChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const value = e.target.value;
-    if (value) onSaveReviewer(value);
-    else onClearReviewer();
-  }
-
   return (
     <div className="assignment-row">
-      <label className="assignment-row__label">
-        <span className="u-text--muted p-text--small">Assignee:</span>
-        <select
-          value={assignee ?? ""}
-          onChange={handleAssigneeChange}
-          onClick={(e) => e.stopPropagation()}
-          className="u-no-margin--bottom"
-        >
-          <option value="">Unassigned</option>
-          {teamMembers.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      </label>
-      <label className="assignment-row__label">
-        <span className="u-text--muted p-text--small">Reviewer:</span>
-        <select
-          value={reviewer ?? ""}
-          onChange={handleReviewerChange}
-          onClick={(e) => e.stopPropagation()}
-          className="u-no-margin--bottom"
-        >
-          <option value="">Unassigned</option>
-          {teamMembers.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      </label>
+      <TeamMemberSelect
+        label="Assignee:"
+        value={assignee}
+        teamMembers={teamMembers}
+        onSelect={onSaveAssignee}
+        onClear={onClearAssignee}
+      />
+      <TeamMemberSelect
+        label="Reviewer:"
+        value={reviewer}
+        teamMembers={teamMembers}
+        onSelect={onSaveReviewer}
+        onClear={onClearReviewer}
+      />
     </div>
   );
 }
@@ -305,6 +280,7 @@ export default function QuestionCard({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [confirmingRevert, setConfirmingRevert] = useState(false);
 
   const unanswered = isUnanswered(item.answer);
   const hasEdit = editedAnswer !== undefined;
@@ -326,12 +302,18 @@ export default function QuestionCard({
     setEditing(false);
   }
 
-  function revertEdit() {
+  function requestRevert() {
+    setConfirmingRevert(true);
+  }
+
+  function confirmRevert() {
     onClearEdit(item.id);
     setEditing(false);
+    setConfirmingRevert(false);
   }
 
   return (
+    <>
     <div
       className={`p-card question-card ${
         unanswered && !hasEdit
@@ -369,8 +351,11 @@ export default function QuestionCard({
 
         {/* Rating badge */}
         {rating !== undefined && (
-          <span className="p-chip p-chip--caution">
-            <span className="p-chip__value">{rating}/5</span>
+          <span className="section-header__block section-header__block--gold">
+            {rating}/5
+            <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" className="rating-badge-star">
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+            </svg>
           </span>
         )}
 
@@ -429,19 +414,16 @@ export default function QuestionCard({
                   <CopyButton text={editedAnswer!} />
                   <button
                     onClick={(e) => { e.stopPropagation(); startEdit(); }}
-                    title="Edit again"
                     className="p-button--base is-dense u-no-margin--bottom"
                   >
-                    <i className="p-icon--edit">
-                      <span className="u-off-screen">Edit again</span>
-                    </i>
+                    <i className="p-icon--edit"></i> Edit again
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); revertEdit(); }}
+                    onClick={(e) => { e.stopPropagation(); requestRevert(); }}
                     title="Revert to original"
                     className="p-button--base is-dense u-no-margin--bottom"
                   >
-                    <i className="p-icon--history">
+                    <i className="p-icon--close">
                       <span className="u-off-screen">Revert to original</span>
                     </i>
                   </button>
@@ -478,7 +460,7 @@ export default function QuestionCard({
                 </button>
                 {hasEdit && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); revertEdit(); }}
+                    onClick={(e) => { e.stopPropagation(); requestRevert(); }}
                     className="p-button--negative u-no-margin--bottom u-push-right"
                   >
                     Revert to original
@@ -525,15 +507,15 @@ export default function QuestionCard({
 
           {/* ── Rating ── */}
           <div className="question-card__section">
-            {unanswered ? (
+            {unanswered && !hasEdit ? (
               <div className="star-rating">
-                <span className="u-text--muted p-text--small">Rate:</span>
+                <span className="u-text--muted p-text--small u-no-margin--bottom">Rate:</span>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <svg key={star} className="star-rating__star-icon" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                   </svg>
                 ))}
-                <span className="u-text--muted p-text--small">
+                <span className="u-text--muted p-text--small u-no-margin--bottom">
                   Not ratable — unanswered
                 </span>
               </div>
@@ -548,5 +530,34 @@ export default function QuestionCard({
         </div>
       </div>
     </div>
+
+    {confirmingRevert && (
+      <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="revert-edit-title">
+        <div className="p-modal__dialog">
+          <header className="p-modal__header">
+            <h2 className="p-modal__title" id="revert-edit-title">Revert to original answer?</h2>
+          </header>
+          <p>
+            This will discard your edited answer for question {item.id} and restore the original.
+            This can&rsquo;t be undone.
+          </p>
+          <footer className="p-modal__footer">
+            <button
+              className="p-button--base u-no-margin--bottom"
+              onClick={() => setConfirmingRevert(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="p-button--negative u-no-margin--bottom"
+              onClick={confirmRevert}
+            >
+              Revert
+            </button>
+          </footer>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

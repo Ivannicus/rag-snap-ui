@@ -1,6 +1,7 @@
 "use client";
 
 import QuestionCard from "./QuestionCard";
+import TeamMemberAvatar from "./TeamMemberAvatar";
 import { isUnanswered } from "@/lib/utils";
 import type { QAItem, TeamMember } from "@/lib/types";
 
@@ -54,10 +55,10 @@ export default function SectionGroup({
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
   const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
-  const assigneeName = teamMembers.find((m) => m.id === assigneeId)?.name ?? "Unassigned";
+  const assigneeMember = teamMembers.find((m) => m.id === assigneeId);
 
   const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
-  const reviewerName = teamMembers.find((m) => m.id === reviewerId)?.name ?? "Unassigned";
+  const reviewerMember = teamMembers.find((m) => m.id === reviewerId);
 
   return (
     <div>
@@ -67,10 +68,30 @@ export default function SectionGroup({
           Section {section}
         </span>
         <span className="section-header__block">
-          Assignee: {assigneeName}
+          Assignee:
+          <span className="section-header__assignment">
+            {assigneeMember ? (
+              <>
+                <TeamMemberAvatar member={assigneeMember} size="small" />
+                {assigneeMember.name}
+              </>
+            ) : (
+              "Unassigned"
+            )}
+          </span>
         </span>
         <span className="section-header__block">
-          Reviewer: {reviewerName}
+          Reviewer:
+          <span className="section-header__assignment">
+            {reviewerMember ? (
+              <>
+                <TeamMemberAvatar member={reviewerMember} size="small" />
+                {reviewerMember.name}
+              </>
+            ) : (
+              "Unassigned"
+            )}
+          </span>
         </span>
         <span className="section-header__block">
           {items.length} {items.length === 1 ? "Question" : "Questions"}
