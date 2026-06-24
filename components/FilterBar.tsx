@@ -1,10 +1,11 @@
 "use client";
 
-import type { Filters, FilterStatus } from "@/lib/types";
+import type { Filters, FilterStatus, PersonFilterOption } from "@/lib/types";
 
 interface Props {
   filters: Filters;
   sections: string[];
+  personFilterOptions: PersonFilterOption[];
   onChange: (filters: Filters) => void;
   resultCount: number;
   totalCount: number;
@@ -19,12 +20,20 @@ const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
 export default function FilterBar({
   filters,
   sections,
+  personFilterOptions,
   onChange,
   resultCount,
   totalCount,
 }: Props) {
   const hasActiveFilters =
     filters.status !== "all" || filters.section !== "" || filters.search !== "";
+
+  const assignmentOptions = personFilterOptions.filter((opt) =>
+    opt.value.startsWith("assignee:")
+  );
+  const reviewOptions = personFilterOptions.filter((opt) =>
+    opt.value.startsWith("reviewer:")
+  );
 
   function setStatus(status: FilterStatus) {
     onChange({ ...filters, status });
@@ -77,11 +86,31 @@ export default function FilterBar({
           className="u-no-margin--bottom filter-bar__select"
         >
           <option value="">All sections</option>
-          {sections.map((sec) => (
-            <option key={sec} value={sec}>
-              Section {sec}
-            </option>
-          ))}
+          {assignmentOptions.length > 0 && (
+            <optgroup label="Filter by assignment">
+              {assignmentOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          {reviewOptions.length > 0 && (
+            <optgroup label="Filter by review">
+              {reviewOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label="Filter by section">
+            {sections.map((sec) => (
+              <option key={sec} value={sec}>
+                Section {sec}
+              </option>
+            ))}
+          </optgroup>
         </select>
 
         {/* Search input */}

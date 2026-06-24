@@ -1,6 +1,7 @@
 "use client";
 
 import QuestionCard from "./QuestionCard";
+import TeamMemberAvatar from "./TeamMemberAvatar";
 import { isUnanswered } from "@/lib/utils";
 import type { QAItem, TeamMember } from "@/lib/types";
 
@@ -50,13 +51,14 @@ export default function SectionGroup({
   const unansweredCount = items.filter(
     (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
   ).length;
+  const answeredCount = items.length - unansweredCount;
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
   const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
-  const assigneeName = teamMembers.find((m) => m.id === assigneeId)?.name ?? "Unassigned";
+  const assigneeMember = teamMembers.find((m) => m.id === assigneeId);
 
   const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
-  const reviewerName = teamMembers.find((m) => m.id === reviewerId)?.name ?? "Unassigned";
+  const reviewerMember = teamMembers.find((m) => m.id === reviewerId);
 
   return (
     <div>
@@ -66,21 +68,42 @@ export default function SectionGroup({
           Section {section}
         </span>
         <span className="section-header__block">
-          Assignee: {assigneeName}
-        </span>
-        <span className="section-header__block">
-          Reviewer: {reviewerName}
-        </span>
-        <span className="section-header__block">
-          {items.length} {items.length === 1 ? "question" : "questions"}
-        </span>
-        {unansweredCount > 0 ? (
-          <span className="section-header__block section-header__block--negative">
-            {items.length > 1 ? `${unansweredCount} Unanswered` : "Unanswered"}
+          Assignee:
+          <span className="section-header__assignment">
+            {assigneeMember ? (
+              <>
+                <TeamMemberAvatar member={assigneeMember} size="small" />
+                {assigneeMember.name}
+              </>
+            ) : (
+              "Unassigned"
+            )}
           </span>
-        ) : (
+        </span>
+        <span className="section-header__block">
+          Reviewer:
+          <span className="section-header__assignment">
+            {reviewerMember ? (
+              <>
+                <TeamMemberAvatar member={reviewerMember} size="small" />
+                {reviewerMember.name}
+              </>
+            ) : (
+              "Unassigned"
+            )}
+          </span>
+        </span>
+        <span className="section-header__block">
+          {items.length} {items.length === 1 ? "Question" : "Questions"}
+        </span>
+        {answeredCount > 0 && (
           <span className="section-header__block section-header__block--positive">
-            {items.length > 1 ? `${items.length} Answered` : "Answered"}
+            {answeredCount} Answered
+          </span>
+        )}
+        {unansweredCount > 0 && (
+          <span className="section-header__block section-header__block--negative">
+            {unansweredCount} Unanswered
           </span>
         )}
         {editedCount > 0 && (

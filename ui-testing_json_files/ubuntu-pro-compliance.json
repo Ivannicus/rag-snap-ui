@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-06-22T09:15:00Z",
+  "model": "gpt-4o-2026-05-13",
+  "results": [
+    {
+      "id": "1.1",
+      "question": "What is Ubuntu Pro's Expanded Security Maintenance (ESM) coverage?",
+      "answer": "Ubuntu Pro's **Expanded Security Maintenance (ESM)** extends security patching to thousands of additional packages in the `universe` repository beyond the standard Main repository coverage.\n- Covers both `esm-infra` (base OS) and `esm-apps` (application layer) package sets\n- Patches are delivered through the same `apt` workflow as standard updates\n- Available on all currently supported LTS releases"
+    },
+    {
+      "id": "1.2",
+      "question": "How long does ESM extend security patching for an LTS release?",
+      "answer": "ESM extends security maintenance to **10 years** from the original release date of an LTS version.\n- Standard support already covers the first 5 years\n- ESM covers years 6 through 10\n- Applies uniformly across `esm-infra` and `esm-apps`"
+    },
+    {
+      "id": "1.3",
+      "question": "Does ESM cover kernel livepatching automatically?",
+      "answer": "No, kernel livepatching is a **separate service** bundled under the same Ubuntu Pro subscription rather than part of ESM itself.\n- ESM covers package-level security patches requiring a standard update/reboot\n- Livepatch applies kernel security patches to a running kernel without rebooting\n- Both services activate together when `pro attach` is run with a valid token"
+    },
+    {
+      "id": "1.4",
+      "question": "What is the SLA for critical CVE patch turnaround under ESM?",
+      "answer": "The provided context does not contain information about a specific SLA for critical CVE patch turnaround times under ESM."
+    },
+    {
+      "id": "2.1",
+      "question": "Is the Ubuntu Pro FIPS 140-3 module validated for all architectures?",
+      "answer": "The provided context does not contain information about which architectures the FIPS 140-3 module has been validated for."
+    },
+    {
+      "id": "3.1",
+      "question": "How does Canonical Livepatch reduce the need for reboots?",
+      "answer": "Canonical Livepatch applies critical kernel security patches **directly to the running kernel in memory**, avoiding the reboot normally required after a kernel update.\n- Patches are downloaded and applied automatically in the background\n- Only high and critical severity kernel CVEs are patched this way\n- A reboot is still required for non-kernel updates or kernel version upgrades"
+    },
+    {
+      "id": "3.2",
+      "question": "What kernel versions are supported by Livepatch on Ubuntu Pro?",
+      "answer": "Livepatch supports the **default GA kernel** shipped with each supported Ubuntu LTS release, as well as the most recent Hardware Enablement (HWE) kernel for that release.\n- Older, superseded HWE kernels are not patched\n- Custom or manually compiled kernels are not supported"
+    },
+    {
+      "id": "3.3",
+      "question": "Can Livepatch be used in air-gapped environments without internet access?",
+      "answer": "The provided context does not contain information about Livepatch support in air-gapped environments."
+    },
+    {
+      "id": "4.1",
+      "question": "What response time does Ubuntu Pro's standard support tier guarantee for severity 1 issues?",
+      "answer": "Standard support under Ubuntu Pro guarantees a **1 business hour** initial response time for Severity 1 (critical, production-down) issues.\n- Coverage is during business hours in the customer's registered region\n- 24/7 coverage is available under the higher support tier"
+    },
+    {
+      "id": "4.2",
+      "question": "Are phone support channels included in the Ubuntu Pro subscription?",
+      "answer": "Yes, phone support is included as an escalation channel alongside the primary ticketing system.\n- Available for Severity 1 and 2 issues\n- Routed through the same support portal used for ticket submission\n- Lower-severity issues are generally handled via ticket/email only"
+    }
+  ]
+}

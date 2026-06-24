@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import FileLoader from "./FileLoader";
-import { formatDate } from "@/lib/utils";
-import { addTeamMember, removeTeamMember } from "@/lib/teamBank";
+import { removeTeamMember } from "@/lib/teamBank";
 import { revertAssignmentsForMember } from "@/lib/session";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
 
@@ -36,40 +35,44 @@ export default function Header({
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
-  const [newName, setNewName] = useState("");
+  const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
+  const manageUsersRef = useRef<HTMLDivElement>(null);
 
-  function handleAddMember() {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    addTeamMember(trimmed);
-    setNewName("");
-  }
+  useEffect(() => {
+    if (!managingUsers || memberToRemove) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (manageUsersRef.current && !manageUsersRef.current.contains(e.target as Node)) {
+        e.stopPropagation();
+        e.preventDefault();
+        setManagingUsers(false);
+      }
+    }
+    document.addEventListener("click", handleClickOutside, true);
+    return () => document.removeEventListener("click", handleClickOutside, true);
+  }, [managingUsers, memberToRemove]);
 
-  function handleRemoveMember(memberId: string) {
-    removeTeamMember(memberId);
-    revertAssignmentsForMember(memberId);
+  function confirmRemoveMember() {
+    if (!memberToRemove) return;
+    removeTeamMember(memberToRemove.id);
+    revertAssignmentsForMember(memberToRemove.id);
+    setMemberToRemove(null);
   }
 
   return (
+    <>
     <header className="p-navigation is-sticky app-header">
-      <div className="p-navigation__row">
-        <div className="p-navigation__banner">
-          <div className="p-navigation__tagged-logo">
-            <a href="#" className="p-navigation__link app-logo-link" onClick={(e) => e.preventDefault()}>
-              <span className="app-logo-icon">
-                <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </span>
-              <span className="app-logo-title">RAG Snap UI</span>
-            </a>
-          </div>
-        </div>
+      <div className="p-navigation__row app-header__row">
+        <span className="app-logo-icon">
+          <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </span>
+        <span className="app-logo-title">RAG Snap UI</span>
         <button
           onClick={onToggleDark}
           aria-label="Toggle dark mode"
-          className="app-header-toggle"
+          className="app-header-toggle u-no-margin--bottom"
         >
           {darkMode ? (
             <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
@@ -81,87 +84,61 @@ export default function Header({
             </svg>
           )}
         </button>
-      </div>
 
-      <div className="p-navigation__row">
-        <div className="header-meta">
-          {/* View toggle */}
-          <div className="header-meta__left">
-            <div className="view-toggle">
-              <button
-                onClick={() => onChangeView("inspector")}
-                className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "inspector" ? "p-button--brand" : "p-button--base"}`}
-              >
-                File Inspector
-              </button>
-              <button
-                onClick={() => onChangeView("database")}
-                className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "database" ? "p-button--brand" : "p-button--base"}`}
-              >
-                RFP Database
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+        {/* Manage users toggle — pinned, always visible, not part of the scrollable section */}
+        <div className="header-manage-users" ref={manageUsersRef}>
+          <button
+            onClick={() => setManagingUsers((m) => !m)}
+            aria-pressed={managingUsers}
+            className={`u-no-margin--bottom is-dense file-loader__button ${managingUsers ? "p-button--brand" : "p-button--base"}`}
+          >
+            Manage Users
+          </button>
 
-      <div className={`p-navigation__row ${activeView === "database" ? "header-meta__hidden" : ""}`}>
-        <div className="header-meta">
-          {/* Left group: Manage Users + Load JSON + filename badge — always on one line */}
-          <div className="header-meta__left">
-            {/* Manage users toggle */}
-            <div className="header-manage-users">
-              <button
-                onClick={() => setManagingUsers((m) => !m)}
-                aria-pressed={managingUsers}
-                className={`u-no-margin--bottom is-dense file-loader__button ${managingUsers ? "p-button--brand" : "p-button--base"}`}
-              >
-                Manage Users
-              </button>
-
-              {managingUsers && (
-                <div className="p-card header-manage-users__panel">
-                  <div className="filter-bar__add-member">
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddMember(); } }}
-                      placeholder="Add team member name"
-                      className="u-no-margin--bottom filter-bar__add-input"
-                    />
-                    <button
-                      onClick={handleAddMember}
-                      disabled={!newName.trim()}
-                      className="p-button--positive u-no-margin--bottom"
-                    >
-                      Add
-                    </button>
-                  </div>
-                  {teamMembers.length > 0 ? (
-                    <ul className="p-list--divided u-no-margin--bottom">
-                      {teamMembers.map((m) => (
-                        <li key={m.id} className="p-list__item filter-bar__member">
-                          <span>{m.name}</span>
-                          <button
-                            onClick={() => handleRemoveMember(m.id)}
-                            title="Remove from team bank"
-                            className="p-button--base u-no-margin--bottom is-dense"
-                          >
-                            <i className="p-icon--close">
-                              <span className="u-off-screen">Remove {m.name}</span>
-                            </i>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="u-text--muted p-text--small u-no-margin--bottom">No team members yet.</p>
-                  )}
-                </div>
+          {managingUsers && (
+            <div className="p-card header-manage-users__panel">
+              {teamMembers.length > 0 ? (
+                <ul className="p-list--divided u-no-margin--bottom">
+                  {teamMembers.map((m) => {
+                    console.log("TeamMember photoURL:", m.id, m.photoURL);
+                    return (
+                    <li key={m.id} className="p-list__item filter-bar__member">
+                      <span className="filter-bar__member-info">
+                        {m.photoURL ? (
+                          <img
+                            src={m.photoURL}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            className="team-member-avatar"
+                          />
+                        ) : (
+                          <span className="team-member-avatar team-member-avatar--placeholder">
+                            <i className="p-icon--user"></i>
+                          </span>
+                        )}
+                        <span>{m.name}</span>
+                      </span>
+                      <button
+                        onClick={() => setMemberToRemove(m)}
+                        aria-label={`Remove ${m.name}`}
+                        className="p-button--brand u-no-margin--bottom is-dense"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="u-text--muted p-text--small u-no-margin--bottom">No team members yet.</p>
               )}
             </div>
+          )}
+        </div>
 
+        <div className="header-meta">
+          {/* Left group: Load JSON + filename badge — always on one line */}
+          <div className="header-meta__left">
             {/* File loader */}
             <FileLoader onLoad={onLoad} />
 
@@ -171,32 +148,85 @@ export default function Header({
             </span>
           </div>
 
-          {/* Right group: model, date, stats — pushed to right edge */}
+          {/* View toggle */}
+          <div className="view-toggle">
+            <button
+              onClick={() => onChangeView("inspector")}
+              className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "inspector" ? "p-button--brand" : "p-button--base"}`}
+            >
+              File Inspector
+            </button>
+            <button
+              onClick={() => onChangeView("database")}
+              className={`u-no-margin--bottom is-dense file-loader__button ${activeView === "database" ? "p-button--brand" : "p-button--base"}`}
+            >
+              RFP Database
+            </button>
+          </div>
+
+          {/* Right group: stats — pushed to right edge */}
           <div className={`header-meta__right ${data ? "" : "header-meta__hidden"}`}>
-            <span className="u-text--muted p-text--small">
-              <i className="p-icon--code"></i> {data?.model || "model"}
-            </span>
-            <span className="u-text--muted p-text--small">
-              {data ? formatDate(data.generated_at) : "date"}
-            </span>
-            <span className="p-chip p-chip--positive">
-              <span className="p-chip__value">{answeredCount} answered</span>
+            <span className="p-chip p-chip--positive u-no-margin--bottom">
+              <span className="p-chip__value">{answeredCount} Answered</span>
             </span>
             {unansweredCount > 0 ? (
-              <span className="p-chip p-chip--negative">
-                <span className="p-chip__value">{unansweredCount} unanswered</span>
+              <span className="p-chip p-chip--negative u-no-margin--bottom">
+                <span className="p-chip__value">{unansweredCount} Unanswered</span>
               </span>
             ) : (
-              <span className="p-chip p-chip--information">
-                <span className="p-chip__value">All answered!</span>
+              <span className="p-chip p-chip--information u-no-margin--bottom">
+                <span className="p-chip__value">All Answered!</span>
               </span>
             )}
-            <span className="u-text--muted p-text--small">
-              {totalCount} total
+            <span className="u-text--muted p-text--small u-no-margin--bottom">
+              {totalCount} Total
             </span>
           </div>
         </div>
       </div>
     </header>
+
+    {memberToRemove && (
+      <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="remove-member-title">
+        <div className="p-modal__dialog">
+          <header className="p-modal__header">
+            <h2 className="p-modal__title" id="remove-member-title">Remove team member?</h2>
+          </header>
+          <div className="remove-member-modal__body">
+            {memberToRemove.photoURL ? (
+              <img
+                src={memberToRemove.photoURL}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="team-member-avatar team-member-avatar--large"
+              />
+            ) : (
+              <span className="team-member-avatar team-member-avatar--large team-member-avatar--placeholder">
+                <i className="p-icon--user"></i>
+              </span>
+            )}
+            <div>
+              <p className="u-no-margin--bottom"><strong>{memberToRemove.name}</strong></p>
+              <p className="u-text--muted p-text--small u-no-margin--bottom">{memberToRemove.email}</p>
+            </div>
+          </div>
+          <footer className="p-modal__footer">
+            <button
+              className="p-button--base u-no-margin--bottom"
+              onClick={() => setMemberToRemove(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="p-button--negative u-no-margin--bottom"
+              onClick={confirmRemoveMember}
+            >
+              Remove
+            </button>
+          </footer>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { auth } from './firebase';
+import { ensureTeamMember } from './teamBank';
 
 const provider = new GoogleAuthProvider();
 // Pre-selects @canonical.com accounts in the Google picker
@@ -12,6 +13,11 @@ export async function signInWithGoogle(): Promise<void> {
     await signOut(auth);
     throw new Error('Access restricted to @canonical.com accounts.');
   }
+  await ensureTeamMember({
+    name: result.user.displayName ?? email,
+    email,
+    photoURL: result.user.photoURL ?? undefined,
+  });
 }
 
 export function signOutUser() {
