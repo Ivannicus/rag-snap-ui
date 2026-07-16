@@ -1,0 +1,716 @@
+version: "1.0"
+knowledge_bases:
+  - third-party-software
+  - canonical-rfp
+  - ubuntu-pro
+  - openstack-upstream
+  - charmed-openstack
+questions:
+  - id: Functional_Technical
+    question: QSTF01. The bidder describes the OpenStack deployment architecture of the various platforms distributed across the two data centers, as well as the potential role of the third site (the test site). They also specify the resilience and high availability mechanisms implemented.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF02. The Bidder describes the mechanisms implemented to avoid any split-brain scenario, particularly at the level of databases, storage and control plane.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF03. The Bidder presents the physical and logical separation strategy of the PFI, PROD and NON-PROD Platforms in each Data Center.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF04. The bidder must provide a detailed description of their strategy for deploying a minimalist cloud (or equivalent) to host infrastructure and platform administration services. This will include specifying the target architecture, the components used, and the management, security, and operational procedures.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF05. The bidder describes in detail the proposed security measures to reinforce the defence-in-depth principles defined in the CCT, specifying their implementation, their scope and their articulation between the different layers of infrastructure.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF06. The Bidder describes the initial capacity of the platforms (PFI, PROD and NON-PROD) as well as the mechanisms allowing its scaling up (number of VMs, expansion of compute resources, storage and network).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF07. The Bidder specifies how the solution guarantees technological neutrality and the absence of proprietary dependence (licenses).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF08. The Submissioner describes the integration mechanisms with the DNS infrastructure, including the automated creation and deletion of records associated with OpenStack resources.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF09. The Bidder describes the platform's scalability capabilities, including the addition of new OpenStack services and the expansion of hardware resources without service interruption.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF10. The Bidder describes the high availability architecture of the control plane (API, database, message queue) specifying the number of controller nodes per site, the quorum and the distribution of components (e.g. MariaDB/Galera, RabbitMQ).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF11. The Bidder describes the backup and restore mechanisms for the control plane (databases, configurations, secrets), as well as the automated full reconstruction (IaC) procedures.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: 'QSTF12. The Bidder describes the operational resilience mechanisms, including: - the DRP/DR mechanisms; - the monitoring of the Galera and RabbitMQ clusters; - the level of support of the OpenStack platform in the event of the loss of two control nodes; - the reliability and control conditions associated with the operation of replacing a controller node, as well as the prerequisites necessary for its implementation; - a complete, documented and validated replacement procedure in the event of hardware failure, guaranteeing continuity of service and maintenance of high availability; - the distribution of the control plane components (database: MariaDB, Galera, etc.).'
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF13. The Bidder proposes a detailed sizing of computing resources (number of nodes, CPU, RAM, VM density) for PFI, NON-PROD and PROD environments.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF14. The Bidder describes the resilience and continuity mechanisms (N+2, headroom, maintenance capacity, failure management with live migration/Masakari).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF15. The bidder describes in detail the mechanisms implemented at the computing layer level to ensure physical isolation between different security contexts (internal sectors, external sectors, specific environments).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF16. The Bidder describes the resource optimization mechanisms (overcommit CPU, CPU pinning, minimum allocation) as well as the associated performance assumptions (benchmarks).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF17. The Bidder describes the overall architecture of the storage solution (OpenStack integration, backends, isolation between environments and sectors).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF18. The Bidder describes the scalability, performance, and QoS capabilities (storage classes, IOPS, latency, contention mechanisms) for the proposed solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF19. The Bidder describes the data resilience and protection mechanisms (HA, inter-site replication, snapshots, DRP, cache protection).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF20. The Bidder describes the proposed security mechanisms as well as the possible integrations with existing services for the proposed solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF21. The Bidder describes the operating procedures and the prerequisites and impacts of maintenance operations for the proposed solution
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF22. The bidder will describe the monitoring and observability mechanisms of the storage solution, specifying their integration capabilities with the Banque de France's observability platform. They will also indicate the logging capabilities, including the generation of access logs and configuration change logs, as well as their export to the Bank's SIEM.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF23. The Bidder describes the overall network architecture (N/S flows, E/O, inter-DC, separation of environments) as well as the associated sizing (interfaces, capacity, latency).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: 'QSTF24. The Bidder specifies: o The number and type of network interfaces per node o The required switching capacity o The load balancer sizing for API endpoints and tenant workloads The Bidder lists the required VLANs for all sites and services: o External Network → Internet / Data / Databases o Management Network → Controllers & Services o Tenant Network → VM Traffic o Storage Network → Storage Cluster o PXE Network → Automatic System Deployment o IPMI Network → iLO Access to BareMetal Servers'
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF25. The Bidder describes and provides the necessary elements for network isolation and security mechanisms (VLAN, micro-segmentation, global flow matrices, provider networks).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF26. The Bidder provides the flow matrix to be implemented for the operation of the platform and describes the isolation and micro-segmentation mechanisms that it will implement as well as the technical MFLs on each VM deployed according to the OS, environment (PFI, NON-PROD and PROD) and sector (INTERNAL or EXTERNAL).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF27. The Bidder describes a routing interconnection target with Firewall clusters A and B, ensuring that there is no asymmetric routing.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF28. The bidder describes the LBaaS solution strategy based on OpenStack Octavia and its integration with EverTrust CLM for automated certificate lifecycle management (provisioning, rotation and SSL renewal), in accordance with the requirements described in the CCT.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF29. The bidder specifies the bandwidth and latency requirements of the dedicated link between site A and site B, enabling replication flows and failover mechanisms, in accordance with RTO and RPO objectives.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF30. The Bidder describes the image creation pipelines (golden images and application images), including build, hardening, security scan and version management, and how to align with the needs expressed by the Bank of France.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF31. The Bidder describes the management of the image lifecycle (update, patching, integration with SCCM/Satellite type tools, offline mode).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF32. The Bidder describes the solution's capacity in terms of the maximum number of tenants, as well as the resource quotas per tenant (CPU, RAM, storage, network). They will also detail the sizing of the OpenStack Keystone, OpenStack Horizon, and API endpoints to support the expected authentication and administration workloads.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF33. The Bidder describes the scalability and extension capabilities of the solution, including a minimum growth of 50% without major redesign, the mechanisms for horizontal and vertical scaling, as well as the methods for adding new sites or regions.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF34. The Bidder describes the database architecture for the solution (multi-master cluster, synchronous replication, quorum).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF35. The Bidder describes the proposed physical hardware architecture for the solution, as well as its alignment with the requirements of the Bank of France defined in the CCT, particularly in terms of partitioning (clusters), separation of internal/external production environments and multi-rack distribution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF36. The Bidder describes the hardware architecture proposed by the solution for the PFI platform as well as the deployment model (extended across two sites or on a single site)
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF37. The Bidder describes the scalability and resource independence mechanisms (compute, storage, network) for the proposed solution
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF38. The bidder proposes a rack-based architecture design for the automated deployment solution, including automated deployment nodes, controllers, compute nodes, and other components.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF39. The Bidder describes the hardware and network sizing recommendations (BOM, firmware, connectivity).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF40. The Bidder precisely defines the network connectivity requirements necessary for the proper functioning of the OpenStack solution and its SDN (Software Defined Networking), as well as the minimum network access and interconnection specifications required to support all the solution's traffic flows.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF41. The Bidder describes its recommendation for the distribution of traffic across physical network cards, in order to optimize performance, security, and resilience.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF42. The Bidder describes the software choices (OpenStack, SDS, SDN) and their compliance with open source requirements and without dependence on licenses.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF43. The Bidder lists the components or software other than OpenStack and/or that are not open source included in its offer.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF44. The Bidder describes the software lifecycle management strategy (patching, EoL, roadmap).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF45. The bidder describes the billing model associated with the installation and evolution of software versions of the solution, and details the terms included in its financial offer.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF46. The Bidder describes in detail the architecture of the OS deployment solution (HA, controllers, PXE, database) and the alignment with the bank's requirements and needs.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF47. The Bidder describes the backup and restore mechanisms for all components (databases, configurations, images, certificates, network services), including backup automation, point-in-time recovery, and rolling upgrade strategy in a high-availability environment.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF48. The bidder describes the mechanisms ensuring operational continuity in the event of a component failure, including the ability to automate provisioning (scripts, detailed procedures) in the event of an incident, the maintenance of the node inventory, and access to the UI and API interfaces for deploying the operating system.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF49. The bidder describes the business continuity plan (BCP), as well as the procedures for complete reconstruction of the environment based on configuration backups and their validation methods.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF50. The Bidder describes the strategy for managing Windows environments (dedicated zone, licensing, vTPM/BitLocker security).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF51. The Bidder describes the resilience and continuity mechanisms for Windows workloads (live migration, HA).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF52. With which types of identity providers (IDPs) is the Solution able to interface natively and under what conditions?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF53. The Bidder defines role-based access control (RBAC) mechanisms and service account management, particularly for DevOps uses, ensuring fine granularity of rights and strict separation of responsibilities (cloud administration, system, network, audit and projects).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF54. The Bidder defines the multi-tenant isolation mechanisms ensuring that a user or project cannot access or interact with another tenant, as well as the ability to define administrative roles limited to a project scope.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF55. The Bidder describes the compatibility requirements of the solution with MFA authentication on the CLI and on Horizon.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF56. The Bidder describes the strategy and roadmap for post-quantum cryptography
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF57. The Bidder describes the maintenance and resilience practices of the solution, including the sequential application of security and bug patches with hot evacuation of compute nodes, automated monitoring of OpenStack services and health checks via CI/CD pipelines, as well as periodic optimization of MariaDB/Galera databases and RabbitMQ queues.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF58. The Bidder describes the high availability and service continuity arrangements, including Galera/Pacemaker quorum monitoring during maintenance operations, regular auditing of VIP failover mechanisms (Keepalived) for API endpoints, and maintaining API traffic redundancy and consistency during maintenance.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF59. The Bidder describes the monitoring and observability mechanisms of the solution, including monitoring of control, computing and storage planes, implementation of centralized logging with a minimum retention of 18 months, and collection of metrics and traces (including OpenStack) via tools such as Prometheus, Grafana, Loki and OpenTelemetry.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF60. The Bidder describes the governance and operational management arrangements, including the definition and monitoring of quotas per project (CPU, RAM, storage) with proactive capacity planning, the use of Infrastructure as Code workflows for changes and governance, as well as secure management of SSH keys (periodic rotation, PAM integration) and centralized collection of logs and compliance reports.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF61. The bidder describes the SSH access management model for the OpenStack deployment, including the use of SSH keys for accessing nodes, and the mechanisms for automating their periodic rotation (every 3 months).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF62. The bidder describes whether the Solution allows for the periodic generation of compliance reports.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF63. The bidder describes the solution's ability to extract the inventory of virtual machines hosted on OpenStack, as well as associated technical information (CPU, RAM, network interfaces, storage), in a usable format such as Excel or equivalent.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF64. The Bidder describes the management of patches and updates, including the categorization and prioritization of patches (critical security, OpenStack, hypervisors) with application deadlines according to criticality, the multi-level validation workflow (PFI tests, benchmarking, rollback plan), as well as the non-disruptive patching strategy (Rolling Upgrades) for the control plane, compute and storage nodes.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF65. 1. For vulnerabilities of very high criticality (CVSS score ≥ 9), the Bidder indicates whether it is able to correct them within a maximum of 7 calendar days. 2. For vulnerabilities of lower criticality (CVSS score < 9), the Bidder indicates whether it is able to correct them within a maximum of 1 month.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF66. The Bidder describes the backup and business continuity measures, including automated daily backups of databases and configuration files, and the synchronization of Glance images with an isolated backup mechanism or air gap.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF67. The Bidder describes advanced backup features, including crash-consistent and application-consistent backups with IBM Storage Protect integration, OpenStack metadata backup to enable full VM rebuild, and support for full, incremental, differential, and snapshot-based backups.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF68. 1. The Bidder describes the DR strategy for NON-PROD, including shared or reduced disaster recovery site, automated or semi-automated restoration of OpenStack services and storage. 2. The Bidder indicates whether it can guarantee the RTO of 48 hours and the RPO of 6 hours. If not, it indicates the RTPO/RPO it proposes.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF69. 1. The Bidder describes the DR strategy for PROD, including a dedicated disaster recovery site, automated failover, critical data protection, orchestration via runbooks/IaC, and proposed RTO/RPO targets. 2. The Bidder indicates whether it can guarantee the 4-hour RTO and 1-hour RPO targets. If not, it indicates the proposed RTPO/RPO.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF70. The Bidder describes the automation strategy via IaC to ensure reproducibility, consistency and rapid rebuild (including Runbook and tests) for the different OpenStack installations.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF71. The Bidder describes the industrialization of deployment via IaC and CI/CD pipelines, including automated deployment and configuration of OpenStack environments, application of security policies and hardening, management of updates and patches, traceability via GitLab, as well as automated post-installation testing and full rebuild capability.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF72. The Bidder describes the automated provisioning of VMs and the deployment of applications via CI/CD pipelines, including system configuration, integration with existing tools, and reproducible deployment controlled by project teams.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF73. The Bidder describes the control mechanisms available for configuration validation, conformity verification, and security checks.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF74. The Bidder describes the uniform naming conventions and IP addressing plan, the consistency of configurations between PFI, NON-PROD and PROD, RBAC management and centralized authentication, access isolation (STD Net / Sec Net), and centralized logging with SIEM filtering.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF75. The bidder specifies the mechanisms guaranteeing alignment between non-production and production environments, as well as the maximum drift window, in accordance with the requirements defined in the CCT.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF76. The bidder must describe the access architecture to the OpenStack platforms, including the separation of networks (STD Net and Sec Net), the mechanisms for isolating and securing administrative access, as well as the access methods to the different VLANs (management, IPMI, provider/external, API) and their integration with access controls (RBAC).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF77. The Bidder describes the integration of OpenStack with the BdF CMDB (daily scan + near real-time update of VMs and components), use of connectors or middleware to avoid tight coupling, state management and deduplication of objects, encryption of exchanges, least privilege and complete logging of access and modifications.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: 'QSTF78. The bidder describes the monitoring and observability architecture of the OpenStack solution, specifying the coverage of all components (control and data planes, OpenStack services, infrastructure), as well as the monitoring of high availability and disaster recovery mechanisms. The bidder provides: • the detailed architecture of the monitoring and log management solution; • the technical prerequisites; • the operating procedures; • any potential limitations of the proposed solution.'
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF79. The bidder describes the mechanisms for collecting, centralizing and using metrics and logs, including the sources collected, frequencies, retention strategies, as well as the capabilities for analysis, correlation and integration with the SIEM.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF80. The bidder describes the alert management mechanisms (detection, prioritization, notification), access security (RBAC, encryption, traceability), as well as the operating, high availability and maintainability methods of the monitoring solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: 'QSTF81. The bidder describes: the notification mechanisms; the detection and reporting times; the possibilities for customizing alert rules.'
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF82. The bidder describes the proposed strategy for maintenance and update operations and how they are carried out without service interruption.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: 'QSTF83. The bidder describes the integration capabilities of the OpenStack solution with the centralized monitoring platform of the Bank of France (SUPNOVA), specifying: • The interfaces available for data exposure (APIs, endpoints, connectors); • The types of data exposed (metrics, logs, events, alerts); • The methods of securing exchanges (authentication, encryption, access control); • The potential performance impacts related to the exposure of this data.'
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF84. The Bidder describes the solution's capabilities in terms of visibility and cost control in the OpenStack environment, including multi-tenant allocation, conversion of technical metrics into costs, forecasting mechanisms, identification of underutilized resources, and management of budget thresholds and alerts.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF85. the mechanisms for collecting, exporting and integrating consumption data (APIs, standard formats, telemetry), as well as reporting, auditing and interoperability capabilities with financial and FinOps tools, while ensuring traceability, security and data consistency.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF86. The Bidder indicates what guarantees it can give on the traceability and reliability of FINOPS data (including the ability to reconstruct it retroactively)?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF87. The bidder describes and specifies the various dashboards offered by the solution, particularly for tenant monitoring, capacity planning and FinOps management, in accordance with the requirements defined in the CCT.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF88. The bidder describes the proposed dashboard for monitoring and visualizing certificate usage and reconciling the OpenStack status with data stored in the BDF certificate lifecycle management tool.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF89. For the Tenant Dashboards, the bidder specifies the mechanisms for feeding these dashboards as well as the sources of information used to produce these indicators.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF90. The Bidder indicates whether it is able to offer a CaaS-type cloud service. If so, the Bidder describes this service, specifying the proposed offering, the architecture, the components, the technical mechanisms, and all associated documentation to ensure alignment with the requirements of the Banque de France.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF91. The Bidder indicates whether it is able to offer a DBAAS-type cloud service. If so, the Bidder describes this service, specifying the proposed offering, architecture, components, technical mechanisms, and all associated documentation to ensure alignment with the requirements of the Banque de France. The Bidder also indicates whether it is able to provide transition assistance with SLA maintenance for 6 to 12 months and dedicated technical support.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF92. The Bidder indicates whether it is able to offer a BMAAS-type cloud service. If so, the Bidder describes this service, specifying the proposed offering, architecture, components, technical mechanisms, and all associated documentation to ensure alignment with the requirements of the Banque de France.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF93. The Bidder describes all the prerequisites necessary for the VCAF phase and indicates what adjustments the Bidder wishes to make to the distribution of responsibilities or to the deadlines for the completion of the VCAF tasks and deliverables?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF94. 1. The Bidder indicates within what timeframe the construction of the 3 Solution facilities and the opening of the service of the NON-PRODUCTION facility and then of the PRODUCTION facility will be carried out.2. The Bidder indicates what adjustments the Bidder wishes to make to the duration of tranche TO1 and to the distribution of responsibilities for the completion of tasks and deliverables?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF95. The bidder specifies any desired adjustments regarding the distribution of responsibilities for the completion of tasks and deliverables of tranche TO2.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF96. The bidder describes the system put in place to ensure the traceability of support requests and incidents dealt with within the framework of support for the solution (services of tranche TO3).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF97. The bidder specifies any desired adjustments regarding the distribution of responsibilities for the completion of tasks and deliverables of tranche TO3.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF98. The bidder specifies the adoption rate of OpenStack versions enabled by the solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF99. The bidder describes their ability to contribute to OpenStack projects, including through source code modifications and bug fixes.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF100. The bidder specifies to what extent the costs related to the use and support of the solution depend on the services used.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF101. The bidder describes to what extent it allows the Bank of France to use the solution autonomously, with a view to sovereignty.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF102. The Bidder indicates whether it is able to provide 24/7 support, with access to personnel possessing OpenStack expertise, for requests concerning the PRODUCTION installation and for requests concerning PFI and NON-PRODUCTION installations. If not, what support hours and conditions can the Bidder guarantee under Tranche 3? The Bidder describes how support requests and incidents are tracked at its level.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF103. The bidder describes the key metrics and indicators planned to monitor the solution. The bidder presents the tools used to monitor the solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF104. Does the Bidder hold any certifications in the field of IT operations? If so, which ones?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF105. The bidder specifies the time slots and calendars that it is able to guarantee for the operation of the solution.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF106. The bidder describes the means put in place to ensure a smooth and efficient flow of tickets exchanged with the Bank of France in the context of the operation of the solution (tranche TO4).
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF107. The bidder describes the proactive actions it intends to take to prevent incidents from occurring.
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF108. The bidder specifies what adjustments they wish to make to the distribution of responsibilities for the completion of tasks and deliverables of tranche TO4?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF109. Does the Bidder implement issue management in accordance with ITIL, and if so, how?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF110. The Bidder describes how it applies the segregation of roles and least privilege to the teams responsible for operating the Solution?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF111. The Bidder describes any adjustments it wishes to make to the duration of the reversibility work (TO5) and to the distribution of responsibilities for the completion of tasks and deliverables?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF112. The Bidder specifies to what extent the reversibility commitments allow the Bank of France to remain in compliance with the directives on outsourcing in terms of Exit Strategy?
+    source: ' Functional &amp; Technical'
+  - id: Functional_Technical
+    question: QSTF113. The Bidder specifies whether the proposed Solution includes software packages and if so, what is the list?
+    source: ' Functional &amp; Technical'
+  - id: Quality
+    question: QSQ01. The bidder describes the recommended methodology, applicable to its teams as well as those of the Bank of France, for carrying out the work entrusted to it.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ02. The bidder describes the commercial and technical escalation procedures that it will put in place as part of the performance of the services.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ03. The bidder describes the technical prerequisites necessary for the VCAF to take place.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ04. The bidder presents the proposed detailed schedule for the VCAF (firm tranche).
+    source: ' Quality'
+  - id: Quality
+    question: QSQ05. The bidder presents the composition of the team in charge of the VCAF works.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ06. The bidder presents the composition of the team in charge of the work of tranche TO1 (implementation/build of the solution after the VCAF).
+    source: ' Quality'
+  - id: Quality
+    question: QSQ07. The bidder describes the tests that will be carried out to verify the conformity of the solution to the needs of the Bank of France.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ08. The bidder presents the proposed schedule for tranche TO1.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ09. The bidder specifies any requests for adaptation of the thresholds of the VSR validation criteria as well as the criteria concerned.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ10. The bidder describes the system put in place (type and number of profiles) to ensure support for the solution (TO3 tranche without activation of the TO4 operating tranche).
+    source: ' Quality'
+  - id: Quality
+    question: QSQ11. The bidder describes the system put in place (type and number of profiles) to ensure the support and operation of the solution within the framework of the services of tranches TO3 and TO4.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ12. The Bidder describes the escalation procedure when the BdF provides a first level of support and escalation to the Holder from the 2nd level of support on the Solution.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ13. Does the Bidder conduct background checks on the personnel responsible for operational services (screening)?
+    source: ' Quality'
+  - id: Quality
+    question: QSQ14. The bidder describes the planned arrangement for the VSR phase as well as for the transition between the implementation phase and the operation of the solution.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ15. The Bidder specifies if Can all or part of the VCAF, construction, and operation work of the Solution be carried out on site? The Bidder specifies whether it is able to work on site in a platform mode.
+    source: ' Quality'
+  - id: Quality
+    question: 'QSQ16. The Bidder specifies whether it plans to use AI (Artificial Intelligence) tools, whether generative or not, in the performance of the contract. If so, it specifies: i) the nature of the tools concerned, distinguishing in particular between internal tools of the Contractor, external services such as SaaS or public cloud, third-party APIs, and embedded open-source tools; ii) the exact role of these tools in the performance of the contract, including assistance with drafting, code generation, code review, document generation, data analysis, support assistance, or any other use to be specified; iii) the safeguards associated with their use, particularly with regard to confidentiality, security, data protection, traceability of use, and human review of the results produced.'
+    source: ' Quality'
+  - id: Quality
+    question: QSQ17. The Bidder provides a first version of the PAQ with its offer, incorporating all the minimum requirements described in the CCT Volume 3 Quality.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ18. The Bidder indicates whether it is able to provide a first version of the incident report 48 hours after the incident occurred and the final version one week after the incident occurred.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ19. The Bidder describes and specifies its level of alignment with the incident management objectives and service commitments (GTI/GTR) defined in the CCT, detailing, where applicable, the gaps and proposed adaptations.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ20. The Bidder indicates whether they are a member of the OpenInfra Foundation. They specify their membership level and the terms of their participation in this ecosystem.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ21. The Bidder specifies its Quality Manager and describes his role, resources, responsibilities, and links with other functions of the company.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ22. The Bidder specifies its objective for the key technical and operational indicators "API service latency" and "Hypervisor usage" and "Resource provisioning success rate"
+    source: ' Quality'
+  - id: Quality
+    question: QSQ23. The Bidder specifies its objective for the Compliance Indicators "Corrective Patching Compliance Rate" and "Documentation Update Timeframe"
+    source: ' Quality'
+  - id: Quality
+    question: QSQ24. The Bidder specifies its objective for the FINOPS Data Freshness Indicators "Standard Dashboard Refresh" and "Critical Alert Latency"
+    source: ' Quality'
+  - id: Quality
+    question: 'QSQ25. The Bidder indicates the accuracy rate it can guarantee for the FINOPS data produced by its Solution; the Bidder indicates: - whether it guarantees a billing accuracy rate of 99.9%; - whether any discrepancy between the raw telemetry data and the invoiced amount does not exceed a margin of error of 0.1%. Otherwise, the Bidder indicates what values it is able to guarantee.'
+    source: ' Quality'
+  - id: Quality
+    question: QSQ26. The bidder presents the proposed tools to help the Bank maintain efficiency objectives (SLO).
+    source: ' Quality'
+  - id: Quality
+    question: QSQ27. The bidder describes the response to the need for an Infrastructure Efficiency Ratio (IER) and the means to ensure its control.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ28. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_01. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ29. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_02. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ30. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_03. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ31. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_04. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ32. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_05. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ33. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_06. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ34. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_07. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ35. The Bidder confirms its acceptance of the penalty amount provided for in the event of non-compliance with indicator IND_QUA_08. If not, it indicates the alternative penalty amount it proposes, accompanied by the corresponding justifications.
+    source: ' Quality'
+  - id: Quality
+    question: QSQ36. The Bidder specifies to what extent the Solution implements the Cloud Auditing Data Federation (CADF) standard?
+    source: ' Quality'
+  - id: Quality
+    question: QSQ37. The bidder describes the possibilities offered by the solution to limit configuration drift.
+    source: ' Quality'
+  - id: Security
+    question: QSS001. What browser and workstation security settings are necessary for the proper functioning of the Solution proposed by the Bidder?
+    source: ' Security'
+  - id: Security
+    question: QSS002. How does the Solution proposed by the Bidder handle multiple connections at a time t from the same user (multi-sessions)?
+    source: ' Security'
+  - id: Security
+    question: 'QSS003. How does the solution proposed by the bidder manage the flow and distribution of components? In particular: - The methods of exchange between the workstation and the server(s); - The methods of exchange between the servers; - The list of components and their distribution on the workstation(s) and on the servers; - The methods of communication and authentication between components; - The exhaustive list of protocols (https, http, tcp/ip, soap, etc.) and communication ports used; - The versions of the components.'
+    source: ' Security'
+  - id: Security
+    question: 'QSS004. Does the Bidder provide the terms of the Solution versions in terms of: - Frequency of publication of "major versions", "minor versions" (releases) and "patches", - Response times according to production lines, - Duration of support for the current version - Testing policy.'
+    source: ' Security'
+  - id: Security
+    question: QSS005. What is the process proposed by the Bidder to facilitate organizational, architectural, configuration and penetration testing audits for the platform and applications?
+    source: ' Security'
+  - id: Security
+    question: QSS006. What is the procedure for protecting data storage media against unauthorized access?
+    source: ' Security'
+  - id: Security
+    question: QSS007. Does the Bidder's Solution provide detailed configurations (hosts/IP/CPU/RAM/Disks) and flow matrices (sources, destinations, ports, and protocols) for the platforms and application tenants?
+    source: ' Security'
+  - id: Security
+    question: QSS008. How are business data and technical data stored separately in the Bidder Solution?
+    source: ' Security'
+  - id: Security
+    question: QSS009. In the case where the Solution stores files on a network share, how are authentication and access authorizations to these files ensured?
+    source: ' Security'
+  - id: Security
+    question: QSS010. How is it possible to directly access the application data to extract or import it in text format (value verification, starting via sqlplus for example), in the case where the Bidder's Solution relies on proprietary internal databases?
+    source: ' Security'
+  - id: Security
+    question: QSS011. How are sensitive Solution data separated from non-sensitive data in the Bidder's offer data model?
+    source: ' Security'
+  - id: Security
+    question: QSS012. Does the Bidder propose a method for encrypting sensitive data handled by the Solution? If not, can it use the DBMS service provided by the Bank of France?
+    source: ' Security'
+  - id: Security
+    question: QSS013. How does the Bidder Solution handle concurrent access?
+    source: ' Security'
+  - id: Security
+    question: QSS014. Does the Bidder provide tools for encrypting and/or sealing data, possibly sensitive data?
+    source: ' Security'
+  - id: Security
+    question: QSS015. What measures will the Bidder implement to protect personal data during the execution of the contract, in addition to those required by the "Personal Data Protection" section of the CCA? The Bank of France will assess the suitability of the Solution and the level of security it guarantees.
+    source: ' Security'
+  - id: Security
+    question: QSS016. What are the mechanisms for verifying the existence of consent before carrying out the associated processing?
+    source: ' Security'
+  - id: Security
+    question: QSS017. Does the Data Controller's Solution provide the technical means to ensure compliance with the exercise of the right to information, the right of access to data and the right to rectification?
+    source: ' Security'
+  - id: Security
+    question: QSS018. What WebService protocols (including versions) are supported by the Bidder's Solution? What security mechanisms are supported, and what serialization is used (XML/JSON)?
+    source: ' Security'
+  - id: Security
+    question: QSS019. Are the APIs offered by the Bidder's Solution secured by authentication tokens (keys)?
+    source: ' Security'
+  - id: Security
+    question: QSS020. Is the Bidder's Solution capable of interfacing with other Bank of France applications to retrieve or send reference data or other types? If so, what are the possible exchange protocols (SOAP/HTTP, REST/JSON, CIFS, MQ…)?
+    source: ' Security'
+  - id: Security
+    question: QSS021. What method does the Bidder Solution use to sign off on deliveries?
+    source: ' Security'
+  - id: Security
+    question: QSS022. What are the possible interactions between the Bidder's Solution scheduler and the Banque de France scheduler? In particular, how is the Solution's scheduler console accessed (browser, desktop client, etc.)? Furthermore, can the Solution's scheduler be used via the command line?
+    source: ' Security'
+  - id: Security
+    question: QSS023. Does the Bidder Solution's internal scheduler require specific access rights to function?
+    source: ' Security'
+  - id: Security
+    question: QSS024. What format does the Bidder's Solution use for generating logs? If the logs are generated in binary format, how can they be decoded?
+    source: ' Security'
+  - id: Security
+    question: QSS025. How many of the ANSSI's secNumCloud hosting requirements does the bidder's solution meet?
+    source: ' Security'
+  - id: Security
+    question: QSS026. Does the Bidder Solution provide different profiles for each level of solution administration and tenants?
+    source: ' Security'
+  - id: Security
+    question: QSS027. How does the Bidder's Solution address the recommendations for managing external logical dependencies?
+    source: ' Security'
+  - id: Security
+    question: QSS028. What sources does the Bidder use for securing environments (CIS, NIST, ISO, etc.)?
+    source: ' Security'
+  - id: Security
+    question: QSS029. Does the Bidder Solution provide SIEM and FIM functionalities?
+    source: ' Security'
+  - id: Security
+    question: QSS030. Does the Bidder Solution allow interfacing with SIEM and FIM solutions? If so, how?
+    source: ' Security'
+  - id: Security
+    question: QSS031. What safety labels, certifications and other safety approvals has the Bidder obtained?
+    source: ' Security'
+  - id: Security
+    question: 'QSS032. What policy does the Bidder intend to implement to maintain the security level of its application in light of evolving vulnerabilities and threats? Does this policy include, in particular, the following elements: - Security monitoring? - The policy for installing any new version and implementing security fixes for a resource? - The checks to be performed before installation?'
+    source: ' Security'
+  - id: Security
+    question: QSS033. How compatible is the Bidder's Solution with the workplace safety constraints set out in the "ACCT5" annexes?
+    source: ' Security'
+  - id: Security
+    question: QSS034. What are the components of the Bidder Solution that manage user authentication, identification, and authorization (directory, database, etc.)?
+    source: ' Security'
+  - id: Security
+    question: QSS035. What are all the types of accounts and their powers necessary for the operation of the Bidder Solution in the Banque de France's IT system?
+    source: ' Security'
+  - id: Security
+    question: QSS036. Does the Bidder's Solution have generic user accounts ("administrator", "guest", "service account", etc.)? What are they? Can they be deleted? In particular, what policy is defined and implemented for managing generic or shared accounts of stakeholders accessing the Solution and the information system elements on which it relies?
+    source: ' Security'
+  - id: Security
+    question: QSS037. Does the Bidder Solution use local accounts?
+    source: ' Security'
+  - id: Security
+    question: QSS038. What technical means has the Bidder put in place to guarantee compliance regarding the exercise of rights?
+    source: ' Security'
+  - id: Security
+    question: QSS039. How does the Bidder Solution interface with the identity and access management system of the Bank of France?
+    source: ' Security'
+  - id: Security
+    question: QSS040. Does the Bidder Solution support silent authentication (Kerberos)?
+    source: ' Security'
+  - id: Security
+    question: QSS041. Does the Bidder Solution allow the use of strong two-factor authentication? What methods are compatible with the Solution (e.g., token, certificate, OTP)?
+    source: ' Security'
+  - id: Security
+    question: QSS042. Does the Bidder Solution manage application profiles and rights by interfacing with the AD directory of the Bank of France?
+    source: ' Security'
+  - id: Security
+    question: QSS043. What is the VPM (Vulnerability Patch Management) process of the Bidder's Solution, and what are the guaranteed deadlines?
+    source: ' Security'
+  - id: Security
+    question: QSS044. For the Bidder Solution, is the control of user-entered data done on the client side, the server side, or both?
+    source: ' Security'
+  - id: Security
+    question: QSS045. What is the kinematics of the connections and flows of the Bidder's Solution allowing querying the database(s), as well as the security put in place for this connection?
+    source: ' Security'
+  - id: Security
+    question: QSS046. Which diagram of the Bidder's Solution allows us to see the level of security between the database and client workstations?
+    source: ' Security'
+  - id: Security
+    question: QSS047. What are the encryption and data integrity mechanisms for data in transit supported by the Bidder's Solution, as well as the key management procedure?
+    source: ' Security'
+  - id: Security
+    question: QSS048. How does the Bidder Solution allow for data segregation by functional scope?
+    source: ' Security'
+  - id: Security
+    question: QSS049. How does the Bidder Solution implement a disconnection mechanism after inactivity?
+    source: ' Security'
+  - id: Security
+    question: QSS050. How does the Bidder Solution enable data tracking, in order to facilitate identification, timestamping and monitoring (new data, modified data, deleted data, etc.)?
+    source: ' Security'
+  - id: Security
+    question: 'QSS051. How do the Bidder Solution logs allow for tracking actions: connection, failure, success, update, etc.?'
+    source: ' Security'
+  - id: Security
+    question: QSS052. How are the logs sent for centralization to a SIEM and what is the collection method and protocol used by the Bidder's Solution?
+    source: ' Security'
+  - id: Security
+    question: QSS053. What events and other information are available in the traces that the Bidder Solution can trace?
+    source: ' Security'
+  - id: Security
+    question: QSS054. The supplier specifies the proposed arrangement for all services and whether all services under the contract will be performed in Europe or not.
+    source: ' Security'
+  - id: CSR_Digital_Sobriety
+    question: QSR01. The Bidder indicates whether it has carried out or is in the process of carrying out an environmental impact assessment of its solution. If so, it specifies the methodology used (standards, LCA, GWP, BEGES and the indicators monitored) and the scope.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR02. The Bidder indicates what measures are used regarding the reduction of its environmental footprint relating to the management of its equipment fleet and in connection with the services performed within the framework of the contract (life cycle analysis, recycling, reconditioning, eco-design...).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR03. The Bidder specifies the features of its solution that can be disabled.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR04. The Bidder indicates whether it applies a GreenOPS approach, namely configuring its software infrastructure so that it consumes less on physical infrastructure.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR05. The Submitter indicates the average size of emails generated by its email sending system (if there is one).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR06. The bidder specifies whether the frequency of sending alerts or emails is configurable.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR07. The Bidder indicates whether there is a procedure to deactivate their email sending system (if there is one).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR08. The Bidder indicates whether the solution allows for the management of alerts visible on the homepage as a replacement for email sending.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR09. The Bidder specifies the notification methods offered as standard in the Solution (email, SMS…).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR10. The Bidder indicates whether their solution includes a breadcrumb trail or access to the site's directory structure.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR11. The Bidder specifies whether the functionalities comply with the principle of fast navigation in the history.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR12. The Bidder specifies whether the solution's functionalities are accessible in fewer than three clicks.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR13. The Bidder describes the principles used to reduce the size of documents, images, or videos in the application.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR14. The Bidder specifies whether they are providing a CSS Print.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR15. The Bidder indicates whether the principle of fast navigation in the history is respected (the browser's "next" and "previous" buttons are functional).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR16. The Bidder indicates whether the solution allows for the management of the business data lifecycle (lifespan, deletion, archiving). The Bank of France prioritizes solutions that enable data lifecycle management.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR17. The Bidder indicates whether the solution allows the management of the lifecycle of the application technical data (logs, backups).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR18. The Bidder specifies the scalability level of its solution.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR19. The Bidder specifies its sustainable development approach within the framework of the contract execution.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR20. The Bidder indicates whether it has followed a web eco-design framework such as the 115 GreenIT best practices, AFNOR Spec guide to eco-design of digital services, GR491 etc…
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR21. The Bidder specifies whether it has adhered to any organizations and reference charters relating to Digital Sobriety.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR22. The Bidder specifies whether its Solution benefits from an ecolabel or environmental display.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR23. The Bidder indicates what proportion of the publisher's or its subcontractors' developers are certified in Ecodesign Web.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR24. The Bidder specifies the planned number of annual version upgrades for the Solution?
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR25. The bidder specifies whether the solution meets the RGAA accessibility criteria.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR26. The Bidder indicates what social measures it is implementing or could implement, in connection with the execution of the contract (for example actions relating to the professional integration of people far from employment, actions for inclusion or in favor of the disability sector…).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR27. The Bidder indicates what actions are being implemented to ensure equal treatment of male and female employees within the company.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR28. The Bidder indicates the percentage of employees who have received CSR training (eco-responsible practices, environmental awareness, etc.).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR29. The Bidder indicates whether the Solution provides a native dashboard to monitor the carbon footprint and energy efficiency (PUE/IT) of the cloud environment.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR30. The Bidder details the features of automated resource recovery (e.g., automatic removal of orphaned volumes or inactive VMs).
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR31. The Bidder explains whether non-essential OpenStack services in the modular architecture solution can be disabled to save control plane overhead.
+    source: ' CSR_Digital Sobriety'
+  - id: CSR_Digital_Sobriety
+    question: QSR32. The Bidder indicates whether it has carried out an environmental impact study (life cycle assessment) of the proposed architecture The Bidder submits the conclusions of the environmental impact study.
+    source: ' CSR_Digital Sobriety'
