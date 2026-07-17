@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import Header from "@/components/Header";
+import Sidebar from "@/components/Sidebar";
 import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
@@ -345,33 +346,26 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
   return (
     <div className="app-shell">
-      <Header
-        data={data}
-        filename={filename}
-        unansweredCount={unansweredCount}
-        totalCount={data?.items.length ?? 0}
-        onLoad={handleLoad}
-        darkMode={darkMode}
-        onToggleDark={toggleDark}
-        teamMembers={teamMembers}
+      <Sidebar
         activeView={activeView}
         onChangeView={handleChangeView}
+        userEmail={userEmail}
+        darkMode={darkMode}
+        onToggleDark={toggleDark}
+        onSignOut={onSignOut}
       />
 
-      {/* User bar */}
-      {userEmail && (
-        <div className="user-bar">
-          <span className="u-text--muted p-text--small u-no-margin--bottom">{userEmail}</span>
-          <button
-            onClick={onSignOut}
-            className="p-button--link u-no-margin--bottom"
-          >
-            Sign out
-          </button>
-        </div>
-      )}
+      <div className="app-content">
+        <Header
+          data={data}
+          filename={filename}
+          unansweredCount={unansweredCount}
+          totalCount={data?.items.length ?? 0}
+          onLoad={handleLoad}
+          teamMembers={teamMembers}
+        />
 
-      <div className={activeView === "database" ? "u-hide" : ""}>
+        <div className={activeView === "database" ? "u-hide" : ""}>
           {/* Live session indicator */}
           {sessionId && (
             <div className="live-session-banner">
@@ -481,13 +475,14 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               </div>
             </main>
           )}
-      </div>
-
-      {hasVisitedDatabase && (
-        <div className={activeView === "inspector" ? "u-hide" : ""}>
-          <RfpDatabaseView />
         </div>
-      )}
+
+        {hasVisitedDatabase && (
+          <div className={activeView === "inspector" ? "u-hide" : ""}>
+            <RfpDatabaseView />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

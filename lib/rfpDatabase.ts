@@ -32,13 +32,11 @@ export function searchRfpRecords(
   query: string,
   dateFilter?: string
 ): RfpRecord[] {
-  const term = query.toLowerCase().trim();
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   return records.filter((r) => {
     if (dateFilter && r.rfpDate !== dateFilter) return false;
-    if (!term) return true;
-    return (
-      r.question.toLowerCase().includes(term) ||
-      r.answer.toLowerCase().includes(term)
-    );
+    if (terms.length === 0) return true;
+    const haystack = `${r.question} ${r.answer}`.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
   });
 }

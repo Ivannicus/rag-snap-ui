@@ -8,9 +8,10 @@ interface Props {
   loading: boolean;
   totalCount: number;
   hasQuery: boolean;
+  searchTerms: string[];
 }
 
-export default function RfpResultsList({ records, loading, totalCount, hasQuery }: Props) {
+export default function RfpResultsList({ records, loading, totalCount, hasQuery, searchTerms }: Props) {
   if (loading) {
     return (
       <div className="empty-state">
@@ -35,7 +36,7 @@ export default function RfpResultsList({ records, loading, totalCount, hasQuery 
       <div className="empty-state">
         <p className="p-heading--4">Search the RFP database</p>
         <p className="u-text--muted">
-          Type a keyword or select a date to find matching Q&amp;A pairs.
+          Type keywords or select a date to find matching Q&amp;A pairs.
           {" "}{totalCount} records available.
         </p>
       </div>
@@ -47,7 +48,7 @@ export default function RfpResultsList({ records, loading, totalCount, hasQuery 
       <div className="empty-state">
         <p className="p-heading--4">No results found</p>
         <p className="u-text--muted">
-          Try a different search term or clear the date filter.
+          Try different keywords or clear the date filter.
         </p>
       </div>
     );
@@ -60,7 +61,7 @@ export default function RfpResultsList({ records, loading, totalCount, hasQuery 
       </p>
       <div className="rfp-results-list__cards">
         {records.map((r) => (
-          <RfpResultCard key={r.id} record={r} />
+          <RfpResultCard key={r.id} record={r} searchTerms={searchTerms} />
         ))}
       </div>
     </div>

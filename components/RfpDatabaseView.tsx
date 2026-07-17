@@ -53,6 +53,11 @@ export default function RfpDatabaseView() {
     [records, query, dateFilter]
   );
 
+  const searchTerms = useMemo(
+    () => query.trim().split(/\s+/).filter(Boolean),
+    [query]
+  );
+
   const lastImported = useMemo(() => {
     if (records.length === 0) return null;
     const max = Math.max(...records.map((r) => r.importedAt));
@@ -93,6 +98,7 @@ export default function RfpDatabaseView() {
         loading={loading}
         totalCount={records.length}
         hasQuery={query.trim().length > 0 || dateFilter.length > 0}
+        searchTerms={searchTerms}
       />
     </main>
   );
