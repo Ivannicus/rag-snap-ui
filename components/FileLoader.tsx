@@ -132,7 +132,7 @@ export default function FileLoader({ onLoad }: Props) {
           </button>
 
           {savedFiles.length > 0 ? (
-            <ul className="p-list--divided u-no-margin--bottom">
+            <ul className="p-list--divided u-no-margin--bottom file-loader__saved-list">
               {savedFiles.map((f) => (
                 <li key={f.id} className="p-list__item filter-bar__member">
                   <button

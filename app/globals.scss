@@ -760,14 +760,35 @@
   position: fixed;
   z-index: 20;
   width: 20rem;
-  overflow-x: hidden;
-  overflow-y: auto;
+  // Never run to the bottom of the screen, no matter how many files are saved.
+  max-height: 66vh;
+  // Column layout so the upload button keeps its place and only the file list scrolls.
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .file-loader__upload-button {
   width: 100%;
   margin-bottom: 0.5rem;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-loader__saved-list {
+  flex: 1 1 auto;
+  // Without this a flex child refuses to shrink below its content height, so the panel would grow
+  // past max-height instead of scrolling.
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  // Keep the scrollbar clear of the Remove buttons. Padding sits inside the scrollport, so the
+  // track lands to the right of it rather than on top of the buttons.
+  padding-right: 0.5rem;
+  // Stop the page behind from taking over once the list hits either end.
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vf-color-border-high-contrast) transparent;
 }
 
 .file-loader__saved-file {
