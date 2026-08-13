@@ -30,7 +30,7 @@ export interface DocMeta {
 
 export type SaveFileResult =
   | { ok: true; id: string }
-  | { ok: false; reason: 'duplicate' };
+  | { ok: false; reason: 'duplicate'; existingId: string };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -136,7 +136,9 @@ interface SaveFileInput {
  * Save a doc, unless one with the same filename or the same content already exists.
  *
  * A duplicate is a normal outcome rather than a failure, so it comes back as
- * `{ ok: false, reason: 'duplicate' }`; only genuine write and hashing failures reject.
+ * `{ ok: false, reason: 'duplicate', existingId }`; only genuine write and hashing failures reject.
+ * `existingId` is the doc that already holds this content, which callers need in order to open that
+ * doc rather than leaving the view attached to nothing.
  *
  * The check compares against `listDocs` metadata, and the hash is stored on the record at write
  * time, so deciding whether a doc is a duplicate never has to re-hash existing docs.
@@ -150,12 +152,12 @@ export async function saveFile({
   const contentHash = await hashDoc(data);
   const existing = await listDocs();
 
-  const isDuplicate = existing.some(
+  const duplicate = existing.find(
     (doc) =>
       doc.filename === filename ||
       (doc.contentHash !== null && doc.contentHash === contentHash)
   );
-  if (isDuplicate) return { ok: false, reason: 'duplicate' };
+  if (duplicate) return { ok: false, reason: 'duplicate', existingId: duplicate.id };
 
   const newRef = push(ref(db, 'savedFiles'));
   await set(newRef, {

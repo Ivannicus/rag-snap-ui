@@ -7,7 +7,8 @@ import { subscribeToSavedFiles, saveFile, removeSavedFile } from "@/lib/savedFil
 import type { ParsedQAFile, SavedFile } from "@/lib/types";
 
 interface Props {
-  onLoad: (data: ParsedQAFile, filename: string) => void;
+  /** `docId` is the saved-file id, which is also the id of the doc's collaboration room. */
+  onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
 }
 
 export default function FileLoader({ onLoad }: Props) {
@@ -53,20 +54,28 @@ export default function FileLoader({ onLoad }: Props) {
     }
     const reader = new FileReader();
     reader.onload = (e) => {
+      let parsed: ParsedQAFile;
       try {
-        const raw = JSON.parse(e.target?.result as string);
-        const parsed = parseQAFile(raw);
-        saveFile({
-          filename: file.name,
-          data: parsed,
-          uploadedByName: auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown",
-          uploadedByEmail: auth.currentUser?.email ?? "",
-        }).catch(() => setError("File loaded, but saving it for the team failed."));
-        onLoad(parsed, file.name);
-        setOpen(false);
+        parsed = parseQAFile(JSON.parse(e.target?.result as string));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to parse file.");
+        return;
       }
+
+      // The doc has to be saved before it can be opened now, because its saved-file id is the id of
+      // the room the view syncs through. A duplicate is not a failure, it just means the doc already
+      // exists, so open the one that is already there rather than storing a second copy.
+      saveFile({
+        filename: file.name,
+        data: parsed,
+        uploadedByName: auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown",
+        uploadedByEmail: auth.currentUser?.email ?? "",
+      })
+        .then((result) => {
+          onLoad(parsed, file.name, result.ok ? result.id : result.existingId);
+          setOpen(false);
+        })
+        .catch(() => setError("Could not save the file for the team, so it was not opened."));
     };
     reader.readAsText(file);
   }
@@ -79,7 +88,7 @@ export default function FileLoader({ onLoad }: Props) {
   }
 
   function handleSelectSavedFile(file: SavedFile) {
-    onLoad(file.data, file.filename);
+    onLoad(file.data, file.filename, file.id);
     setOpen(false);
   }
 

@@ -1,27 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import { createSession } from "@/lib/session";
-import type { SessionState } from "@/lib/types";
 
 interface Props {
-  sessionState: SessionState;
+  docId: string;
 }
 
-type Status = "idle" | "saving" | "success" | "error";
+type Status = "idle" | "success" | "error";
 
-export default function ShareButton({ sessionState }: Props) {
+/**
+ * Copy a link to the open doc.
+ *
+ * The room already exists, keyed by the doc's saved-file id, so there is no session to create and
+ * nowhere to navigate. Anyone opening this URL joins the same room.
+ */
+export default function ShareButton({ docId }: Props) {
   const [status, setStatus] = useState<Status>("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   async function handleShare() {
-    setStatus("saving");
-    setShareUrl(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("doc", docId);
+    const link = url.toString();
     try {
-      const sessionId = await createSession(sessionState);
-      const url = `${window.location.origin}?session=${sessionId}`;
-      await navigator.clipboard.writeText(url);
-      window.location.href = url;
+      await navigator.clipboard.writeText(link);
+      setShareUrl(link);
+      setStatus("success");
+      setTimeout(() => setStatus("idle"), 3000);
     } catch {
       setStatus("error");
       setTimeout(() => setStatus("idle"), 3000);
@@ -32,7 +37,6 @@ export default function ShareButton({ sessionState }: Props) {
     <div className="share-button">
       <button
         onClick={handleShare}
-        disabled={status === "saving"}
         className={`u-no-margin--bottom ${
           status === "success"
             ? "p-button--positive"
@@ -41,11 +45,7 @@ export default function ShareButton({ sessionState }: Props) {
             : "p-button--brand"
         }`}
       >
-        {status === "saving" ? (
-          <>
-            <i className="p-icon--spinner u-animation--spin"></i> Saving…
-          </>
-        ) : status === "success" ? (
+        {status === "success" ? (
           <>
             <i className="p-icon--success"></i> Link copied!
           </>
@@ -55,7 +55,7 @@ export default function ShareButton({ sessionState }: Props) {
           </>
         ) : (
           <>
-            <i className="p-icon--share"></i> Share session
+            <i className="p-icon--share"></i> Copy doc link
           </>
         )}
       </button>
@@ -67,7 +67,7 @@ export default function ShareButton({ sessionState }: Props) {
       )}
       {status === "error" && (
         <p className="share-button__status p-text--small">
-          Could not save session. Check Firebase config.
+          Could not copy the link. Copy it from the address bar instead.
         </p>
       )}
     </div>

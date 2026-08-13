@@ -1,4 +1,4 @@
-import { ref, set, update, remove, onValue, off, get } from 'firebase/database';
+import { ref, set, update, remove, onValue, get } from 'firebase/database';
 import { db } from './firebase';
 import type { SessionState } from './types';
 
@@ -23,9 +23,19 @@ function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
   return out;
 }
 
-export async function createSession(state: SessionState): Promise<string> {
-  const sessionId = crypto.randomUUID();
-  await set(ref(db, `sessions/${sessionId}`), {
+/**
+ * Create the session node for a doc if it does not exist yet.
+ *
+ * The session id is the doc's saved-file id, so opening the same doc always lands in the same room.
+ * That makes this idempotent by design: the first tab to open a doc seeds the node, and every later
+ * open is a no-op that leaves the existing overlays alone.
+ */
+export async function ensureSession(sessionId: string, state: SessionState): Promise<void> {
+  const sessionRef = ref(db, `sessions/${sessionId}`);
+  const snapshot = await get(sessionRef);
+  if (snapshot.exists()) return;
+
+  await set(sessionRef, {
     data: state.data,
     filename: state.filename,
     editedAnswers: encodeKeys(state.editedAnswers),
@@ -35,7 +45,6 @@ export async function createSession(state: SessionState): Promise<string> {
     reviewers: encodeKeys(state.reviewers),
     createdAt: Date.now(),
   });
-  return sessionId;
 }
 
 export function subscribeToSession(
@@ -43,7 +52,10 @@ export function subscribeToSession(
   onUpdate: (state: SessionState) => void
 ): () => void {
   const sessionRef = ref(db, `sessions/${sessionId}`);
-  onValue(sessionRef, (snapshot) => {
+  // onValue's own return value detaches exactly this callback. The previous `off(sessionRef)`
+  // detached every listener registered at the path, so two overlapping subscriptions to one doc
+  // (a React strict-mode double mount, say) would take each other down.
+  return onValue(sessionRef, (snapshot) => {
     const val = snapshot.val();
     if (val) {
       onUpdate({
@@ -57,7 +69,6 @@ export function subscribeToSession(
       });
     }
   });
-  return () => off(sessionRef);
 }
 
 export function updateAnswer(sessionId: string, itemId: string, answer: string) {

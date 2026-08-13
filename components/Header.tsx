@@ -13,7 +13,7 @@ interface Props {
   filename: string | null;
   unansweredCount: number;
   totalCount: number;
-  onLoad: (data: ParsedQAFile, filename: string) => void;
+  onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
   teamMembers: TeamMember[];
 }
 

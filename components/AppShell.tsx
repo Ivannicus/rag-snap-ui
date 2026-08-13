@@ -11,6 +11,7 @@ import ExportButton from "@/components/ExportButton";
 import ShareButton from "@/components/ShareButton";
 import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
 import {
+  ensureSession,
   subscribeToSession,
   updateAnswer,
   clearAnswer,
@@ -27,6 +28,27 @@ import { subscribeToTeamMembers } from "@/lib/teamBank";
 import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
+
+/**
+ * Shallow value equality for the overlay maps.
+ *
+ * Every remote snapshot arrives as freshly built objects, so applying one unconditionally would
+ * re-render every card even when nothing changed. Comparing values lets an echo of our own write
+ * settle without a render.
+ */
+function sameMap<T>(a: Record<string, T>, b: Record<string, T>): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every((key) => a[key] === b[key]);
+}
+
+/** Point the address bar at a doc without navigating, which a static export cannot do. */
+function syncDocParam(id: string) {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("doc") === id) return;
+  url.searchParams.set("doc", id);
+  window.history.replaceState(null, "", url.toString());
+}
 
 interface Props {
   initialState?: SessionState;
@@ -55,12 +77,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     () => initialState?.reviewers ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
+  // doc always joins the same room instead of minting a new random session.
+  const [docId, setDocId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("inspector");
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
-
-  // Suppress own-write echo: track whether incoming RTDB update was triggered by us
-  const suppressNextUpdate = useRef(false);
 
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
@@ -98,30 +119,52 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     return subscribeToTeamMembers(setTeamMembers);
   }, []);
 
-  // Join session from URL param on mount
+  // Adopt the doc named in the URL on mount. Full ?doc= routing lands in a later phase; this is
+  // just enough for a second tab on the same URL to join the same room.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const sid = params.get("session");
-    if (!sid) return;
-
-    setSessionId(sid);
-
-    const unsubscribe = subscribeToSession(sid, (state) => {
-      if (suppressNextUpdate.current) {
-        suppressNextUpdate.current = false;
-        return;
-      }
-      setData(state.data);
-      setFilename(state.filename);
-      setEditedAnswers(state.editedAnswers);
-      setRatings(state.ratings);
-      setContextUrls(state.contextUrls);
-      setAssignees(state.assignees);
-      setReviewers(state.reviewers);
-    });
-
-    return unsubscribe;
+    const id = params.get("doc");
+    if (id) setDocId(id);
   }, []);
+
+  /**
+   * Apply a remote snapshot.
+   *
+   * There is no echo suppression: every snapshot is applied, including the echo of our own write.
+   * That is safe because RTDB reflects local writes in local snapshots before the server confirms
+   * them, so an echo can never carry a value older than what we already hold, and because writes
+   * are per field, so an echo for one item cannot clobber another. `sameMap` keeps the no-op echoes
+   * from causing renders.
+   *
+   * Doc content is immutable within a session and is set by whoever opened the doc, so `data` and
+   * `filename` are only adopted when we have none. That covers a tab that joined by URL with
+   * nothing loaded, without letting a snapshot replace the doc under an open one.
+   */
+  const applyRemoteState = useCallback((state: SessionState) => {
+    if (state.data) setData((prev) => prev ?? state.data);
+    if (state.filename) setFilename((prev) => prev ?? state.filename);
+    setEditedAnswers((prev) => (sameMap(prev, state.editedAnswers) ? prev : state.editedAnswers));
+    setRatings((prev) => (sameMap(prev, state.ratings) ? prev : state.ratings));
+    setContextUrls((prev) => (sameMap(prev, state.contextUrls) ? prev : state.contextUrls));
+    setAssignees((prev) => (sameMap(prev, state.assignees) ? prev : state.assignees));
+    setReviewers((prev) => (sameMap(prev, state.reviewers) ? prev : state.reviewers));
+  }, []);
+
+  // One listener per doc. Keying the effect on docId makes React tear the previous listener down
+  // before attaching the next one, so a doc switch cannot leave the old room subscribed. The
+  // `active` flag is belt and braces: even if a snapshot were already queued when the listener was
+  // detached, it cannot land in the newly opened doc's state.
+  useEffect(() => {
+    if (!docId) return;
+    let active = true;
+    const unsubscribe = subscribeToSession(docId, (state) => {
+      if (active) applyRemoteState(state);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [docId, applyRemoteState]);
 
   function toggleDark() {
     setDarkMode((d) => {
@@ -130,7 +173,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     });
   }
 
-  const handleLoad = useCallback((loaded: ParsedQAFile, name: string) => {
+  /**
+   * Open a doc, replacing whatever was open.
+   *
+   * Switching docs means switching rooms, so session identity is repointed here. Setting `docId`
+   * changes the subscription effect's dependency, which tears down the previous doc's listener
+   * before the next one attaches, and every subsequent write is addressed to the new id. Both used
+   * to leak: the maps were cleared but the id was left alone, so edits to the new doc landed in the
+   * previous doc's node.
+   */
+  const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
     setData(loaded);
     setFilename(name);
     setFilters(DEFAULT_FILTERS);
@@ -139,15 +191,42 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setContextUrls({});
     setAssignees({});
     setReviewers({});
+    setDocId(loadedDocId);
+    syncDocParam(loadedDocId);
+
+    // Seed the room for whoever opens this doc first. Existing sessions are left untouched, and
+    // their overlays arrive through the subscription a moment later.
+    void ensureSession(loadedDocId, {
+      data: loaded,
+      filename: name,
+      editedAnswers: {},
+      ratings: {},
+      contextUrls: {},
+      assignees: {},
+      reviewers: {},
+    });
   }, []);
+
+  /**
+   * Address a write to the open doc's room.
+   *
+   * An open doc is always a session, so this is the one place that still checks: the postMessage
+   * import path renders AppShell with `initialState` and no doc id, and it cannot be given one
+   * without editing that receiver. Everywhere else `docId` is set and the write goes through
+   * unconditionally.
+   */
+  const writeToSession = useCallback(
+    (write: (sessionId: string) => Promise<unknown>) => {
+      if (!docId) return;
+      write(docId);
+    },
+    [docId]
+  );
 
   const handleSaveRating = useCallback((id: string, rating: number) => {
     setRatings((prev) => ({ ...prev, [id]: rating }));
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      updateRating(sessionId, id, rating);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => updateRating(sid, id, rating));
+  }, [writeToSession]);
 
   const handleClearRating = useCallback((id: string) => {
     setRatings((prev) => {
@@ -155,19 +234,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      clearRating(sessionId, id);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => clearRating(sid, id));
+  }, [writeToSession]);
 
   const handleSaveEdit = useCallback((id: string, answer: string) => {
     setEditedAnswers((prev) => ({ ...prev, [id]: answer }));
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      updateAnswer(sessionId, id, answer);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => updateAnswer(sid, id, answer));
+  }, [writeToSession]);
 
   const handleClearEdit = useCallback((id: string) => {
     setEditedAnswers((prev) => {
@@ -175,19 +248,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      clearAnswer(sessionId, id);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => clearAnswer(sid, id));
+  }, [writeToSession]);
 
   const handleSaveContextUrl = useCallback((id: string, url: string) => {
     setContextUrls((prev) => ({ ...prev, [id]: url }));
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      updateContextUrl(sessionId, id, url);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => updateContextUrl(sid, id, url));
+  }, [writeToSession]);
 
   const handleClearContextUrl = useCallback((id: string) => {
     setContextUrls((prev) => {
@@ -195,19 +262,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      clearContextUrl(sessionId, id);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => clearContextUrl(sid, id));
+  }, [writeToSession]);
 
   const handleSaveAssignee = useCallback((id: string, memberId: string) => {
     setAssignees((prev) => ({ ...prev, [id]: memberId }));
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      updateAssignee(sessionId, id, memberId);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => updateAssignee(sid, id, memberId));
+  }, [writeToSession]);
 
   const handleClearAssignee = useCallback((id: string) => {
     setAssignees((prev) => {
@@ -215,19 +276,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      clearAssignee(sessionId, id);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => clearAssignee(sid, id));
+  }, [writeToSession]);
 
   const handleSaveReviewer = useCallback((id: string, memberId: string) => {
     setReviewers((prev) => ({ ...prev, [id]: memberId }));
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      updateReviewer(sessionId, id, memberId);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => updateReviewer(sid, id, memberId));
+  }, [writeToSession]);
 
   const handleClearReviewer = useCallback((id: string) => {
     setReviewers((prev) => {
@@ -235,11 +290,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
-    if (sessionId) {
-      suppressNextUpdate.current = true;
-      clearReviewer(sessionId, id);
-    }
-  }, [sessionId]);
+    writeToSession((sid) => clearReviewer(sid, id));
+  }, [writeToSession]);
 
   const unansweredCount = useMemo(
     () =>
@@ -340,10 +392,6 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const editCount = Object.keys(editedAnswers).length;
   const contextUrlCount = Object.keys(contextUrls).length;
 
-  const currentSessionState: SessionState | null = data
-    ? { data, filename: filename ?? "", editedAnswers, ratings, contextUrls, assignees, reviewers }
-    : null;
-
   return (
     <div className="app-shell">
       <Sidebar
@@ -367,10 +415,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
         <div className={activeView === "database" ? "u-hide" : ""}>
           {/* Live session indicator */}
-          {sessionId && (
+          {docId && (
             <div className="live-session-banner">
               <span className="live-session-banner__dot" />
-              Live session — edits sync in real time
+              Live session, edits sync in real time
             </div>
           )}
 
@@ -438,9 +486,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                     </p>
                   </div>
                   <div className="export-footer__actions">
-                    {currentSessionState && !sessionId && (
-                      <ShareButton sessionState={currentSessionState} />
-                    )}
+                    {docId && <ShareButton docId={docId} />}
                     <ExportButton
                       data={data}
                       editedAnswers={editedAnswers}
