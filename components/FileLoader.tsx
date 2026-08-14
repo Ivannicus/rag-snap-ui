@@ -9,9 +9,11 @@ import type { ParsedQAFile, SavedFile } from "@/lib/types";
 interface Props {
   /** `docId` is the saved-file id, which is also the id of the doc's collaboration room. */
   onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
+  /** Called with the removed doc's id. The view closes it only if it is the one on screen. */
+  onDocRemoved: (docId: string) => void;
 }
 
-export default function FileLoader({ onLoad }: Props) {
+export default function FileLoader({ onLoad, onDocRemoved }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -92,10 +94,20 @@ export default function FileLoader({ onLoad }: Props) {
     setOpen(false);
   }
 
-  function confirmRemoveFile() {
+  async function confirmRemoveFile() {
     if (!fileToRemove) return;
-    removeSavedFile(fileToRemove.id);
+    const removed = fileToRemove;
+    setError(null);
+    try {
+      await removeSavedFile(removed.id);
+    } catch {
+      setFileToRemove(null);
+      setError("Could not remove that file. Please try again.");
+      return;
+    }
     setFileToRemove(null);
+    // Only after the removal succeeds, and only closes the view if this is the doc on screen.
+    onDocRemoved(removed.id);
   }
 
   return (

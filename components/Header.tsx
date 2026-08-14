@@ -22,6 +22,9 @@ interface Props {
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
   contextUrls: Record<string, string>;
+  onError: (title: string, message: string) => void;
+  /** Called with the removed doc's saved-file id, from either removal path. */
+  onDocRemoved: (docId: string) => void;
 }
 
 export default function Header({
@@ -35,6 +38,8 @@ export default function Header({
   editedAnswers,
   ratings,
   contextUrls,
+  onError,
+  onDocRemoved,
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
@@ -116,7 +121,7 @@ export default function Header({
           <div className="header-meta">
             {/* File loader + filename */}
             <div className="header-meta__left">
-              <FileLoader onLoad={onLoad} />
+              <FileLoader onLoad={onLoad} onDocRemoved={onDocRemoved} />
               <span className={`section-header__block ${data ? "" : "header-meta__hidden"}`}>
                 {filename || "filename.json"}
               </span>
@@ -132,6 +137,9 @@ export default function Header({
                   ratings={ratings}
                   contextUrls={contextUrls}
                   sourceFilename={filename}
+                  docId={docId}
+                  onError={onError}
+                  onDocRemoved={onDocRemoved}
                 />
               </div>
             )}

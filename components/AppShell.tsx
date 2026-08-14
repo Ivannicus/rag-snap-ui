@@ -48,6 +48,14 @@ function syncDocParam(id: string) {
   window.history.replaceState(null, "", url.toString());
 }
 
+/** Drop the doc from the address bar, so a reload does not try to reopen what was just removed. */
+function clearDocParam() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("doc")) return;
+  url.searchParams.delete("doc");
+  window.history.replaceState(null, "", url.toString());
+}
+
 interface Props {
   initialState?: SessionState;
   userEmail?: string;
@@ -80,9 +88,14 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [docId, setDocId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("inspector");
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
-  // Set when a write to the session is rejected. Without this the UI shows the change as though it
-  // saved, because local state is updated independently of the write.
-  const [writeFailed, setWriteFailed] = useState(false);
+  // Set when something that should have persisted did not. Without this the UI shows the change as
+  // though it saved, because local state is updated independently of the write.
+  const [errorNotice, setErrorNotice] = useState<{ title: string; message: string } | null>(null);
+
+  // One notification for the whole app. Stable, so callbacks that take it do not churn.
+  const showError = useCallback((title: string, message: string) => {
+    setErrorNotice({ title, message });
+  }, []);
 
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
@@ -183,15 +196,19 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * to leak: the maps were cleared but the id was left alone, so edits to the new doc landed in the
    * previous doc's node.
    */
-  const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
-    setData(loaded);
-    setFilename(name);
+  const clearOverlays = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
     setEditedAnswers({});
     setRatings({});
     setContextUrls({});
     setAssignees({});
     setReviewers({});
+  }, []);
+
+  const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
+    setData(loaded);
+    setFilename(name);
+    clearOverlays();
     setDocId(loadedDocId);
     syncDocParam(loadedDocId);
 
@@ -206,7 +223,37 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       assignees: {},
       reviewers: {},
     });
-  }, []);
+  }, [clearOverlays]);
+
+  /**
+   * Close the open doc, back to the state before anything was loaded.
+   *
+   * This takes the same route as opening a different doc: `setDocId` is what the subscription
+   * effect keys on, so setting it to null runs that effect's cleanup and detaches the listener,
+   * exactly as a switch does. There is no separate teardown to keep in step.
+   *
+   * Local only. Nothing under `/sessions/<docId>` is written or deleted, so anyone else with this
+   * doc open keeps their session and their overlays untouched.
+   */
+  const handleCloseDoc = useCallback(() => {
+    setData(null);
+    setFilename(null);
+    clearOverlays();
+    setDocId(null);
+    clearDocParam();
+  }, [clearOverlays]);
+
+  /**
+   * A doc was removed from the shared bank. Only the doc on screen closes; removing any other doc
+   * from the loader list just drops it from that list and leaves the current work alone.
+   */
+  const handleDocRemoved = useCallback(
+    (removedDocId: string) => {
+      if (removedDocId !== docId) return;
+      handleCloseDoc();
+    },
+    [docId, handleCloseDoc]
+  );
 
   /**
    * Address a write to the open doc's room.
@@ -223,9 +270,14 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const writeToSession = useCallback(
     (write: (sessionId: string) => Promise<unknown>) => {
       if (!docId) return;
-      write(docId).catch(() => setWriteFailed(true));
+      write(docId).catch(() =>
+        showError(
+          "Change may not have saved",
+          "Your change is still shown here, but it may not have reached the server. Check your connection, then make the change again to be sure it sticks."
+        )
+      );
     },
-    [docId]
+    [docId, showError]
   );
 
   const handleSaveRating = useCallback((id: string, rating: number) => {
@@ -417,6 +469,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           editedAnswers={editedAnswers}
           ratings={ratings}
           contextUrls={contextUrls}
+          onError={showError}
+          onDocRemoved={handleDocRemoved}
         />
 
         <div className={activeView === "database" ? "u-hide" : ""}>
@@ -514,21 +568,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         )}
       </div>
 
-      {/* Write failure notice. Stays until dismissed, because an unsaved change is worth noticing
-          rather than something to let fade away. */}
-      {writeFailed && (
+      {/* Failure notice. Stays until dismissed, because something that did not persist is worth
+          noticing rather than something to let fade away. */}
+      {errorNotice && (
         <div className="write-toast">
           <div className="p-notification--negative u-no-margin--bottom" role="alert">
             <div className="p-notification__content">
-              <h5 className="p-notification__title">Change may not have saved</h5>
-              <p className="p-notification__message">
-                Your change is still shown here, but it may not have reached the server. Check your
-                connection, then make the change again to be sure it sticks.
-              </p>
+              <h5 className="p-notification__title">{errorNotice.title}</h5>
+              <p className="p-notification__message">{errorNotice.message}</p>
             </div>
             <button
               className="p-notification__close"
-              onClick={() => setWriteFailed(false)}
+              onClick={() => setErrorNotice(null)}
             >
               Close
             </button>
