@@ -7,8 +7,6 @@ import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
-import ExportButton from "@/components/ExportButton";
-import ShareButton from "@/components/ShareButton";
 import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
 import {
   ensureSession,
@@ -82,6 +80,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [docId, setDocId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("inspector");
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
+  // Set when a write to the session is rejected. Without this the UI shows the change as though it
+  // saved, because local state is updated independently of the write.
+  const [writeFailed, setWriteFailed] = useState(false);
 
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
@@ -214,11 +215,15 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * import path renders AppShell with `initialState` and no doc id, and it cannot be given one
    * without editing that receiver. Everywhere else `docId` is set and the write goes through
    * unconditionally.
+   *
+   * All 14 change callbacks funnel through here, which makes it the single place to notice a
+   * rejected write. Local state has already been updated by the time the rejection arrives, so the
+   * change stays on screen and the toast is the only signal that it may not have persisted.
    */
   const writeToSession = useCallback(
     (write: (sessionId: string) => Promise<unknown>) => {
       if (!docId) return;
-      write(docId);
+      write(docId).catch(() => setWriteFailed(true));
     },
     [docId]
   );
@@ -389,9 +394,6 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
   const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
 
-  const editCount = Object.keys(editedAnswers).length;
-  const contextUrlCount = Object.keys(contextUrls).length;
-
   return (
     <div className="app-shell">
       <Sidebar
@@ -411,6 +413,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           totalCount={data?.items.length ?? 0}
           onLoad={handleLoad}
           teamMembers={teamMembers}
+          docId={docId}
+          editedAnswers={editedAnswers}
+          ratings={ratings}
+          contextUrls={contextUrls}
         />
 
         <div className={activeView === "database" ? "u-hide" : ""}>
@@ -474,28 +480,6 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                   </div>
                 )}
 
-                <div className="export-footer">
-                  <div>
-                    <p className="u-no-margin--bottom">
-                      <strong>Export results</strong>
-                    </p>
-                    <p className="u-text--muted p-text--small">
-                      CSV with question, original answer, edited answer, context URL, and rating columns.
-                      {editCount > 0 && ` ${editCount} edited answer${editCount !== 1 ? "s" : ""} included.`}
-                      {contextUrlCount > 0 && ` ${contextUrlCount} context URL${contextUrlCount !== 1 ? "s" : ""} included.`}
-                    </p>
-                  </div>
-                  <div className="export-footer__actions">
-                    {docId && <ShareButton docId={docId} />}
-                    <ExportButton
-                      data={data}
-                      editedAnswers={editedAnswers}
-                      ratings={ratings}
-                      contextUrls={contextUrls}
-                      sourceFilename={filename}
-                    />
-                  </div>
-                </div>
               </main>
             </>
           ) : (
@@ -529,6 +513,28 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           </div>
         )}
       </div>
+
+      {/* Write failure notice. Stays until dismissed, because an unsaved change is worth noticing
+          rather than something to let fade away. */}
+      {writeFailed && (
+        <div className="write-toast">
+          <div className="p-notification--negative u-no-margin--bottom" role="alert">
+            <div className="p-notification__content">
+              <h5 className="p-notification__title">Change may not have saved</h5>
+              <p className="p-notification__message">
+                Your change is still shown here, but it may not have reached the server. Check your
+                connection, then make the change again to be sure it sticks.
+              </p>
+            </div>
+            <button
+              className="p-notification__close"
+              onClick={() => setWriteFailed(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
