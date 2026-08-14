@@ -788,7 +788,8 @@
 .export-button__badge {
   margin-left: 0.5rem;
   padding: 0.0625rem 0.4rem;
-  border-radius: 1rem;
+  // Square, matching the badge style used everywhere else rather than a pill.
+  border-radius: 0;
   font-size: 0.75rem;
   background-color: rgb(255 255 255 / 20%);
 }
