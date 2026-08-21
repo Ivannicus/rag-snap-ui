@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import FileLoader from "./FileLoader";
+import ShareButton from "./ShareButton";
+import ExportButton from "./ExportButton";
 import { removeTeamMember } from "@/lib/teamBank";
 import { revertAssignmentsForMember } from "@/lib/session";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
@@ -13,8 +15,16 @@ interface Props {
   filename: string | null;
   unansweredCount: number;
   totalCount: number;
-  onLoad: (data: ParsedQAFile, filename: string) => void;
+  onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
   teamMembers: TeamMember[];
+  /** Null until a doc is open. Present means there is a room to link to. */
+  docId: string | null;
+  editedAnswers: Record<string, string>;
+  ratings: Record<string, number>;
+  contextUrls: Record<string, string>;
+  onError: (title: string, message: string) => void;
+  /** Called with the removed doc's saved-file id, from either removal path. */
+  onDocRemoved: (docId: string) => void;
 }
 
 export default function Header({
@@ -24,6 +34,12 @@ export default function Header({
   totalCount,
   onLoad,
   teamMembers,
+  docId,
+  editedAnswers,
+  ratings,
+  contextUrls,
+  onError,
+  onDocRemoved,
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
@@ -105,11 +121,28 @@ export default function Header({
           <div className="header-meta">
             {/* File loader + filename */}
             <div className="header-meta__left">
-              <FileLoader onLoad={onLoad} />
+              <FileLoader onLoad={onLoad} onDocRemoved={onDocRemoved} />
               <span className={`section-header__block ${data ? "" : "header-meta__hidden"}`}>
                 {filename || "filename.json"}
               </span>
             </div>
+
+            {/* Doc actions, only meaningful once something is open */}
+            {data && (
+              <div className="header-actions">
+                {docId && <ShareButton docId={docId} />}
+                <ExportButton
+                  data={data}
+                  editedAnswers={editedAnswers}
+                  ratings={ratings}
+                  contextUrls={contextUrls}
+                  sourceFilename={filename}
+                  docId={docId}
+                  onError={onError}
+                  onDocRemoved={onDocRemoved}
+                />
+              </div>
+            )}
 
             {/* Stats */}
             <div className={`header-meta__right ${data ? "" : "header-meta__hidden"}`}>

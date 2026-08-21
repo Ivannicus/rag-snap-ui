@@ -7,10 +7,13 @@ import { subscribeToSavedFiles, saveFile, removeSavedFile } from "@/lib/savedFil
 import type { ParsedQAFile, SavedFile } from "@/lib/types";
 
 interface Props {
-  onLoad: (data: ParsedQAFile, filename: string) => void;
+  /** `docId` is the saved-file id, which is also the id of the doc's collaboration room. */
+  onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
+  /** Called with the removed doc's id. The view closes it only if it is the one on screen. */
+  onDocRemoved: (docId: string) => void;
 }
 
-export default function FileLoader({ onLoad }: Props) {
+export default function FileLoader({ onLoad, onDocRemoved }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -53,20 +56,49 @@ export default function FileLoader({ onLoad }: Props) {
     }
     const reader = new FileReader();
     reader.onload = (e) => {
+      let parsed: ParsedQAFile;
       try {
-        const raw = JSON.parse(e.target?.result as string);
-        const parsed = parseQAFile(raw);
-        saveFile({
-          filename: file.name,
-          data: parsed,
-          uploadedByName: auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown",
-          uploadedByEmail: auth.currentUser?.email ?? "",
-        }).catch(() => setError("File loaded, but saving it for the team failed."));
-        onLoad(parsed, file.name);
-        setOpen(false);
+        parsed = parseQAFile(JSON.parse(e.target?.result as string));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to parse file.");
+        return;
       }
+
+      // The doc has to be saved before it can be opened now, because its saved-file id is the id of
+      // the room the view syncs through. That makes the id the one thing this must not get wrong: it
+      // decides whose edits this file's questions are shown alongside.
+      saveFile({
+        filename: file.name,
+        data: parsed,
+        uploadedByName: auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown",
+        uploadedByEmail: auth.currentUser?.email ?? "",
+      })
+        .then((result) => {
+          if (result.ok) {
+            onLoad(parsed, file.name, result.id);
+            setOpen(false);
+            return;
+          }
+
+          if (result.reason === "duplicate") {
+            // The bank already holds this exact content, so no second copy is stored and the doc
+            // that is already there is opened. What is on screen is what was just uploaded, because
+            // matching content is what identified the doc in the first place.
+            onLoad(parsed, file.name, result.existingId);
+            setOpen(false);
+            return;
+          }
+
+          // A different file already occupies this filename. Opening its id would put this file's
+          // questions in a room holding someone else's document: their edits, ratings and
+          // assignments would appear against these questions by position, and any edit made here
+          // would be written into their doc. There is nothing correct to open, so name the clash
+          // and leave the current view alone.
+          setError(
+            `A different file is already saved as "${file.name}". Rename this file, or remove the saved one first.`
+          );
+        })
+        .catch(() => setError("Could not save the file for the team, so it was not opened."));
     };
     reader.readAsText(file);
   }
@@ -79,14 +111,24 @@ export default function FileLoader({ onLoad }: Props) {
   }
 
   function handleSelectSavedFile(file: SavedFile) {
-    onLoad(file.data, file.filename);
+    onLoad(file.data, file.filename, file.id);
     setOpen(false);
   }
 
-  function confirmRemoveFile() {
+  async function confirmRemoveFile() {
     if (!fileToRemove) return;
-    removeSavedFile(fileToRemove.id);
+    const removed = fileToRemove;
+    setError(null);
+    try {
+      await removeSavedFile(removed.id);
+    } catch {
+      setFileToRemove(null);
+      setError("Could not remove that file. Please try again.");
+      return;
+    }
     setFileToRemove(null);
+    // Only after the removal succeeds, and only closes the view if this is the doc on screen.
+    onDocRemoved(removed.id);
   }
 
   return (
@@ -123,7 +165,7 @@ export default function FileLoader({ onLoad }: Props) {
           </button>
 
           {savedFiles.length > 0 ? (
-            <ul className="p-list--divided u-no-margin--bottom">
+            <ul className="p-list--divided u-no-margin--bottom file-loader__saved-list">
               {savedFiles.map((f) => (
                 <li key={f.id} className="p-list__item filter-bar__member">
                   <button
