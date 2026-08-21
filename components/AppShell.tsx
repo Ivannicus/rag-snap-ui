@@ -22,6 +22,7 @@ import {
   updateReviewer,
   clearReviewer,
 } from "@/lib/session";
+import { getSavedFile } from "@/lib/savedFiles";
 import { subscribeToTeamMembers } from "@/lib/teamBank";
 import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
 
@@ -91,11 +92,22 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   // Set when something that should have persisted did not. Without this the UI shows the change as
   // though it saved, because local state is updated independently of the write.
   const [errorNotice, setErrorNotice] = useState<{ title: string; message: string } | null>(null);
+  // Opening a doc named in the URL takes a fetch, so between mount and that settling the view is
+  // neither empty nor loaded. "missing" is a link whose doc is gone, which needs saying out loud —
+  // it used to be indistinguishable from having opened nothing at all.
+  const [sharedDocState, setSharedDocState] = useState<"none" | "loading" | "missing">("none");
 
   // One notification for the whole app. Stable, so callbacks that take it do not churn.
   const showError = useCallback((title: string, message: string) => {
     setErrorNotice({ title, message });
   }, []);
+
+  // Mirrors docId for the URL-open effect below, which needs to know whether a doc has been opened
+  // since its fetch started, but must not re-run when that changes.
+  const docIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    docIdRef.current = docId;
+  }, [docId]);
 
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
@@ -131,14 +143,6 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   // Subscribe to the global team member bank
   useEffect(() => {
     return subscribeToTeamMembers(setTeamMembers);
-  }, []);
-
-  // Adopt the doc named in the URL on mount. Full ?doc= routing lands in a later phase; this is
-  // just enough for a second tab on the same URL to join the same room.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("doc");
-    if (id) setDocId(id);
   }, []);
 
   /**
@@ -211,10 +215,19 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     clearOverlays();
     setDocId(loadedDocId);
     syncDocParam(loadedDocId);
+    // A doc is open, so whatever the URL was doing is finished. Clearing it here rather than only in
+    // the effect below keeps a stale "file no longer available" notice from resurfacing later, when
+    // the reader loads a file and then closes it again.
+    setSharedDocState("none");
 
     // Seed the room for whoever opens this doc first. Existing sessions are left untouched, and
     // their overlays arrive through the subscription a moment later.
-    void ensureSession(loadedDocId, {
+    //
+    // The failure is reported rather than discarded. The doc opens and stays editable either way, so
+    // there is nothing here for the person who loaded it to fix — but the seed is what carries this
+    // doc into its room, and discarding the news that it failed is what let someone hand out a share
+    // link that could only ever open onto nothing.
+    ensureSession(loadedDocId, {
       data: loaded,
       filename: name,
       editedAnswers: {},
@@ -222,8 +235,64 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       contextUrls: {},
       assignees: {},
       reviewers: {},
-    });
-  }, [clearOverlays]);
+    }).catch(() =>
+      showError(
+        "Live sharing may not be ready",
+        "This file is open and your changes are kept, but the shared session for it could not be started. People opening the share link may not see your edits until you reload this page."
+      )
+    );
+  }, [clearOverlays, showError]);
+
+  /**
+   * Open the doc named in the URL.
+   *
+   * The content comes from the saved-file bank, not from the room. Those are two different nodes and
+   * only one of them is certain to exist: subscribing and waiting for a snapshot meant that a link to
+   * a doc whose room had never been seeded — because that write failed, or because the doc predates
+   * rooms — showed "No file loaded" indefinitely, under a banner announcing a live session. Fetching
+   * the content instead makes the link answerable from the doc itself, and routing it through
+   * `handleLoad` seeds the room on the way in, so following such a link repairs the gap rather than
+   * waiting on it.
+   */
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("doc");
+    if (!id) return;
+
+    let active = true;
+    setSharedDocState("loading");
+
+    getSavedFile(id)
+      .then((saved) => {
+        if (!active) return;
+        // A slow fetch must not reach past a doc the reader opened themselves while it was in
+        // flight. Their choice is the more recent one, so it stands and this result is dropped.
+        if (docIdRef.current) {
+          setSharedDocState("none");
+          return;
+        }
+        if (!saved) {
+          // The link outlived the file. Drop the id from the address bar so a reload stops retrying
+          // a doc that is not coming back.
+          setSharedDocState("missing");
+          clearDocParam();
+          return;
+        }
+        handleLoad(saved.data, saved.filename, saved.id);
+      })
+      .catch(() => {
+        if (!active) return;
+        // Unlike a missing doc, this may well succeed on a retry, so the id stays in the URL.
+        setSharedDocState("none");
+        showError(
+          "Could not open that link",
+          "The file this link points to could not be loaded. Check your connection, then reload the page to try again."
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [handleLoad, showError]);
 
   /**
    * Close the open doc, back to the state before anything was loaded.
@@ -536,8 +605,31 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
               </main>
             </>
+          ) : sharedDocState === "loading" ? (
+            <main className="app-main no-file-state">
+              <i className="p-icon--spinner u-animation--spin p-icon--xx-large"></i>
+              <h2 className="p-heading--2">Opening shared file</h2>
+              <p className="u-text--muted">Fetching the file this link points to.</p>
+            </main>
           ) : (
             <main className="app-main no-file-state">
+              {/* A dead share link is worth naming. Left unsaid, it looks exactly like never having
+                  opened anything, and the reader is left to wonder whether the link or the app is
+                  at fault. */}
+              {sharedDocState === "missing" && (
+                <div
+                  className="p-notification--caution no-file-state__notice"
+                  role="status"
+                >
+                  <div className="p-notification__content">
+                    <h5 className="p-notification__title">File no longer available</h5>
+                    <p className="p-notification__message">
+                      The file this link points to has been removed from the shared list. Load
+                      another file below, or ask whoever shared the link for an up-to-date one.
+                    </p>
+                  </div>
+                </div>
+              )}
               <i className="p-icon--file p-icon--xx-large"></i>
               <h2 className="p-heading--2">No file loaded</h2>
               <p className="u-text--muted">

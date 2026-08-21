@@ -65,8 +65,8 @@ export default function FileLoader({ onLoad, onDocRemoved }: Props) {
       }
 
       // The doc has to be saved before it can be opened now, because its saved-file id is the id of
-      // the room the view syncs through. A duplicate is not a failure, it just means the doc already
-      // exists, so open the one that is already there rather than storing a second copy.
+      // the room the view syncs through. That makes the id the one thing this must not get wrong: it
+      // decides whose edits this file's questions are shown alongside.
       saveFile({
         filename: file.name,
         data: parsed,
@@ -74,8 +74,29 @@ export default function FileLoader({ onLoad, onDocRemoved }: Props) {
         uploadedByEmail: auth.currentUser?.email ?? "",
       })
         .then((result) => {
-          onLoad(parsed, file.name, result.ok ? result.id : result.existingId);
-          setOpen(false);
+          if (result.ok) {
+            onLoad(parsed, file.name, result.id);
+            setOpen(false);
+            return;
+          }
+
+          if (result.reason === "duplicate") {
+            // The bank already holds this exact content, so no second copy is stored and the doc
+            // that is already there is opened. What is on screen is what was just uploaded, because
+            // matching content is what identified the doc in the first place.
+            onLoad(parsed, file.name, result.existingId);
+            setOpen(false);
+            return;
+          }
+
+          // A different file already occupies this filename. Opening its id would put this file's
+          // questions in a room holding someone else's document: their edits, ratings and
+          // assignments would appear against these questions by position, and any edit made here
+          // would be written into their doc. There is nothing correct to open, so name the clash
+          // and leave the current view alone.
+          setError(
+            `A different file is already saved as "${file.name}". Rename this file, or remove the saved one first.`
+          );
         })
         .catch(() => setError("Could not save the file for the team, so it was not opened."));
     };

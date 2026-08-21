@@ -1,4 +1,4 @@
-import { ref, push, set, get, remove, onValue, off } from 'firebase/database';
+import { ref, push, set, get, remove, onValue, update } from 'firebase/database';
 import { db } from './firebase';
 import type { ParsedQAFile, SavedFile } from './types';
 
@@ -28,9 +28,19 @@ export interface DocMeta {
   contentHash: string | null;
 }
 
+/**
+ * Outcome of a save attempt.
+ *
+ * The two rejections are deliberately separate, because they call for opposite handling. `duplicate`
+ * means an existing doc holds this exact content, so opening `existingId` shows the caller the very
+ * questions and answers they just uploaded. `filenameConflict` means a *different* doc already owns
+ * this filename: opening it would show content the caller did not upload, so there is nothing safe
+ * to open and the collision has to be surfaced instead.
+ */
 export type SaveFileResult =
   | { ok: true; id: string }
-  | { ok: false; reason: 'duplicate'; existingId: string };
+  | { ok: false; reason: 'duplicate'; existingId: string }
+  | { ok: false; reason: 'filenameConflict'; existingId: string };
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -106,7 +116,11 @@ export function subscribeToSavedFiles(
   onUpdate: (files: SavedFile[]) => void
 ): () => void {
   const savedFilesRef = ref(db, 'savedFiles');
-  onValue(savedFilesRef, (snapshot) => {
+  // Returns onValue's own unsubscribe, which detaches exactly this callback. The previous
+  // `off(savedFilesRef)` detached every listener at the path, so two overlapping subscriptions —
+  // a React strict-mode double mount, or two mounted loaders — would take each other down and
+  // leave the saved-file list frozen. Same fix as `subscribeToSession`.
+  return onValue(savedFilesRef, (snapshot) => {
     const val = snapshot.val() as Record<string, StoredDoc> | null;
     const files: SavedFile[] = val
       ? Object.entries(val)
@@ -122,7 +136,49 @@ export function subscribeToSavedFiles(
       : [];
     onUpdate(files);
   });
-  return () => off(savedFilesRef);
+}
+
+/**
+ * One-shot read of a single saved doc, or null if there is no doc with that id.
+ *
+ * This is what makes a shared `?doc=` link work: the content of a doc lives here, independently of
+ * the collaboration room, so a tab that arrives holding nothing but an id can fetch what to show
+ * instead of waiting on a room snapshot that may never come.
+ */
+export async function getSavedFile(id: string): Promise<SavedFile | null> {
+  const snapshot = await get(ref(db, `savedFiles/${id}`));
+  const stored = snapshot.val() as StoredDoc | null;
+  if (!stored || !stored.data) return null;
+  return {
+    id,
+    filename: stored.filename,
+    data: stored.data,
+    uploadedByName: stored.uploadedByName,
+    uploadedByEmail: stored.uploadedByEmail,
+    uploadedAt: stored.uploadedAt,
+  };
+}
+
+/**
+ * Content hash of an already-stored doc, or null if its data cannot be read.
+ *
+ * Only needed for records written before `contentHash` existed, which is every record saved before
+ * this feature landed. Without this, the first upload of an existing doc after the upgrade would
+ * match on filename with no hash to compare against, and would have to be treated as a collision —
+ * making a doc that is already in the bank look like a conflict with itself.
+ *
+ * The hash is written back to the record as a side effect, so each legacy doc is read and hashed at
+ * most once. That write is deliberately not awaited and its failure deliberately ignored: it is a
+ * cache fill, and losing it costs one repeated read next time rather than a wrong answer now.
+ */
+async function storedContentHash(id: string): Promise<string | null> {
+  const snapshot = await get(ref(db, `savedFiles/${id}/data`));
+  const data = snapshot.val() as ParsedQAFile | null;
+  if (!data || !Array.isArray(data.items)) return null;
+
+  const hash = await hashDoc(data);
+  void update(ref(db, `savedFiles/${id}`), { contentHash: hash }).catch(() => {});
+  return hash;
 }
 
 interface SaveFileInput {
@@ -133,15 +189,20 @@ interface SaveFileInput {
 }
 
 /**
- * Save a doc, unless one with the same filename or the same content already exists.
+ * Save a doc, unless one with the same content, or one already using this filename, exists.
  *
- * A duplicate is a normal outcome rather than a failure, so it comes back as
- * `{ ok: false, reason: 'duplicate', existingId }`; only genuine write and hashing failures reject.
- * `existingId` is the doc that already holds this content, which callers need in order to open that
- * doc rather than leaving the view attached to nothing.
+ * Neither rejection is a failure, so both come back as an `ok: false` result; only genuine write and
+ * hashing failures reject. What matters is which one it is. Content is the thing that decides
+ * identity, so it is checked first and on its own: a matching hash means the bank already holds this
+ * doc, whatever it happens to be called, and `existingId` is safe to open. Only once content has
+ * ruled itself out does the filename matter, and then it means the opposite — a *different* doc is
+ * using this name, so `existingId` holds content the caller never uploaded and must not be opened as
+ * though it were theirs. Collapsing the two into one `duplicate` result is what let a re-upload
+ * under a reused name open a room belonging to unrelated content.
  *
- * The check compares against `listDocs` metadata, and the hash is stored on the record at write
- * time, so deciding whether a doc is a duplicate never has to re-hash existing docs.
+ * The check compares against `listDocs` metadata and the hash stored on each record at write time,
+ * so it does not re-hash existing docs — except for records predating `contentHash`, which
+ * `storedContentHash` resolves once each.
  */
 export async function saveFile({
   filename,
@@ -152,12 +213,19 @@ export async function saveFile({
   const contentHash = await hashDoc(data);
   const existing = await listDocs();
 
-  const duplicate = existing.find(
-    (doc) =>
-      doc.filename === filename ||
-      (doc.contentHash !== null && doc.contentHash === contentHash)
-  );
-  if (duplicate) return { ok: false, reason: 'duplicate', existingId: duplicate.id };
+  const sameContent = existing.find((doc) => doc.contentHash === contentHash);
+  if (sameContent) return { ok: false, reason: 'duplicate', existingId: sameContent.id };
+
+  // Records with no stored hash cannot be ruled out by the check above, so any of them sharing this
+  // filename has to be hashed before its name can be called a conflict.
+  const sameName = existing.filter((doc) => doc.filename === filename);
+  for (const doc of sameName) {
+    const knownHash = doc.contentHash ?? (await storedContentHash(doc.id));
+    if (knownHash === contentHash) return { ok: false, reason: 'duplicate', existingId: doc.id };
+  }
+  if (sameName.length > 0) {
+    return { ok: false, reason: 'filenameConflict', existingId: sameName[0].id };
+  }
 
   const newRef = push(ref(db, 'savedFiles'));
   await set(newRef, {

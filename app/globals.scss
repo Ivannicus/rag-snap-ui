@@ -762,6 +762,14 @@
   max-width: 24rem;
 }
 
+// The surrounding empty state centres and centre-aligns everything, so the notice needs its own
+// width and alignment to read as prose instead of as a centred banner stretched across the page.
+.no-file-state__notice {
+  max-width: 32rem;
+  margin-bottom: 2rem;
+  text-align: left;
+}
+
 .auth-gate-loading {
   min-height: 100vh;
   display: flex;

@@ -1,4 +1,4 @@
-import { ref, set, update, remove, onValue, get } from 'firebase/database';
+import { ref, update, remove, onValue, get, runTransaction } from 'firebase/database';
 import { db } from './firebase';
 import type { SessionState } from './types';
 
@@ -29,21 +29,35 @@ function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
  * The session id is the doc's saved-file id, so opening the same doc always lands in the same room.
  * That makes this idempotent by design: the first tab to open a doc seeds the node, and every later
  * open is a no-op that leaves the existing overlays alone.
+ *
+ * The seed runs as a transaction rather than a read followed by a write, because the two are not the
+ * same thing under concurrency. Two people opening a doc at the same moment both saw the node
+ * missing, and both then wrote the whole node, so the second write replaced the first — taking with
+ * it any overlay the first person had already made in the gap. A transaction re-runs its handler
+ * against the server's current value, so exactly one seed lands and any node that already exists is
+ * left completely alone.
  */
 export async function ensureSession(sessionId: string, state: SessionState): Promise<void> {
   const sessionRef = ref(db, `sessions/${sessionId}`);
-  const snapshot = await get(sessionRef);
-  if (snapshot.exists()) return;
+  // Fixed outside the handler: the handler can run more than once, and the node's creation time
+  // should not depend on how many attempts contention happened to cost.
+  const createdAt = Date.now();
 
-  await set(sessionRef, {
-    data: state.data,
-    filename: state.filename,
-    editedAnswers: encodeKeys(state.editedAnswers),
-    ratings: encodeKeys(state.ratings),
-    contextUrls: encodeKeys(state.contextUrls),
-    assignees: encodeKeys(state.assignees),
-    reviewers: encodeKeys(state.reviewers),
-    createdAt: Date.now(),
+  await runTransaction(sessionRef, (current) => {
+    // `undefined` aborts the transaction without writing. The node is already seeded, which is the
+    // ordinary case for every open after the first, so there is nothing to do and nothing to report.
+    if (current !== null) return undefined;
+
+    return {
+      data: state.data,
+      filename: state.filename,
+      editedAnswers: encodeKeys(state.editedAnswers),
+      ratings: encodeKeys(state.ratings),
+      contextUrls: encodeKeys(state.contextUrls),
+      assignees: encodeKeys(state.assignees),
+      reviewers: encodeKeys(state.reviewers),
+      createdAt,
+    };
   });
 }
 
