@@ -7,7 +7,8 @@ import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
-import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
+import { groupBySection, getSections, isUnanswered, sectionKeyOf } from "@/lib/utils";
+import { resolveSections } from "@/lib/sectioning";
 import {
   ensureSession,
   subscribeToSession,
@@ -429,10 +430,19 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     [data, editedAnswers]
   );
 
-  const allSections = useMemo(
-    () => (data ? getSections(data.items) : []),
+  /**
+   * Sections are resolved once per file, from the *full* item list.
+   *
+   * Deliberately memoised on `data` alone. Resolving over filteredItems would let topic
+   * inference redraw its boundaries on every keystroke in the search box, rearranging sections
+   * under the user and appearing to move assignments between them.
+   */
+  const sectionMap = useMemo(
+    () => resolveSections(data?.items ?? []),
     [data]
   );
+
+  const allSections = useMemo(() => getSections(sectionMap), [sectionMap]);
 
   // Per-person filter options, computed dynamically from who actually has
   // assignments/reviews in the currently loaded file (not the full team bank).
@@ -489,7 +499,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       matchingSections = new Set(
         data.items
           .filter((i) => roleMap[i.id] === memberId)
-          .map((i) => i.id.split(".")[0])
+          .map((i) => sectionKeyOf(sectionMap, i))
       );
     }
 
@@ -500,8 +510,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       if (status === "answered" && effectivelyUnanswered) return false;
       if (status === "unanswered" && !effectivelyUnanswered) return false;
       if (matchingSections) {
-        if (!matchingSections.has(item.id.split(".")[0])) return false;
-      } else if (section && item.id.split(".")[0] !== section) {
+        if (!matchingSections.has(sectionKeyOf(sectionMap, item))) return false;
+      } else if (section && sectionKeyOf(sectionMap, item) !== section) {
         return false;
       }
       if (term) {
@@ -511,9 +521,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers, assignees, reviewers]);
+  }, [data, filters, editedAnswers, assignees, reviewers, sectionMap]);
 
-  const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
+  const grouped = useMemo(
+    () => groupBySection(filteredItems, sectionMap),
+    [filteredItems, sectionMap]
+  );
 
   return (
     <div className="app-shell">
@@ -578,7 +591,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                   <div className="section-groups">
                     {grouped.map(({ section, items }) => (
                       <SectionGroup
-                        key={section}
+                        key={section.key}
                         section={section}
                         items={items}
                         searchTerm={filters.search}

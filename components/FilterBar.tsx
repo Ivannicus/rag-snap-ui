@@ -1,10 +1,10 @@
 "use client";
 
-import type { Filters, FilterStatus, PersonFilterOption } from "@/lib/types";
+import type { Filters, FilterStatus, PersonFilterOption, SectionInfo } from "@/lib/types";
 
 interface Props {
   filters: Filters;
-  sections: string[];
+  sections: SectionInfo[];
   personFilterOptions: PersonFilterOption[];
   onChange: (filters: Filters) => void;
   resultCount: number;
@@ -105,9 +105,11 @@ export default function FilterBar({
             </optgroup>
           )}
           <optgroup label="Filter by section">
+            {/* sec.label already reads as a heading ("Section 3", "Inferred: Active Directory"),
+                so it is rendered verbatim rather than prefixed here. */}
             {sections.map((sec) => (
-              <option key={sec} value={sec}>
-                Section {sec}
+              <option key={sec.key} value={sec.key}>
+                {sec.label}
               </option>
             ))}
           </optgroup>

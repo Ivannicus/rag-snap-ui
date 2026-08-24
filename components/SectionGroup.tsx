@@ -3,10 +3,10 @@
 import QuestionCard from "./QuestionCard";
 import TeamMemberAvatar from "./TeamMemberAvatar";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem, TeamMember } from "@/lib/types";
+import type { QAItem, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
-  section: string;
+  section: SectionInfo;
   items: QAItem[];
   searchTerm?: string;
   editedAnswers: Record<string, string>;
@@ -64,9 +64,17 @@ export default function SectionGroup({
     <div>
       {/* Section header */}
       <div className="section-header">
-        <span className="p-heading--5 u-no-margin--bottom">
-          Section {section}
-        </span>
+        <span className="p-heading--5 u-no-margin--bottom">{section.label}</span>
+        {/* An inferred section is our topic guess, not a heading from the RFP. Say so, so nobody
+            treats the boundary as authoritative when assigning work against it. */}
+        {section.inferred && (
+          <span
+            className="section-header__block section-header__block--caution"
+            title="No section data in this file — questions grouped by topic similarity"
+          >
+            Inferred grouping
+          </span>
+        )}
         <span className="section-header__block">
           Assignee:
           <span className="section-header__assignment">

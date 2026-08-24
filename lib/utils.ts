@@ -1,4 +1,4 @@
-import type { QAFile, QAItem, ParsedQAFile } from "./types";
+import type { QAFile, QAItem, ParsedQAFile, SectionInfo, SectionMap } from "./types";
 
 /** Phrase that marks an answer as "not found in context" */
 const UNANSWERED_PREFIX = "The provided context does not contain";
@@ -7,15 +7,24 @@ export function isUnanswered(answer: string): boolean {
   return answer.trimStart().startsWith(UNANSWERED_PREFIX);
 }
 
-/** Extract section number from an id like "1.2" → "1" */
+/**
+ * Extract the section part of a hierarchical id like "1.2" → "1".
+ *
+ * Only meaningful for ids that actually are hierarchical. For a flat id ("7") this returns the id
+ * itself, which is why it must not be used as a grouping key on its own — see lib/sectioning.ts.
+ */
 export function sectionOf(id: string): string {
   return id.split(".")[0];
 }
 
-/** Get unique sorted section numbers from item list */
-export function getSections(items: QAItem[]): string[] {
-  const set = new Set(items.map((i) => sectionOf(i.id)));
-  return Array.from(set).sort((a, b) => Number(a) - Number(b));
+/** Sections available for the filter dropdown, in resolved order. */
+export function getSections(map: SectionMap): SectionInfo[] {
+  return map.sections;
+}
+
+/** The section key an item belongs to, per the resolved map. */
+export function sectionKeyOf(map: SectionMap, item: QAItem): string {
+  return map.byItemId[item.id] ?? "";
 }
 
 /** Parse and validate uploaded JSON */
@@ -56,7 +65,15 @@ export function parseQAFile(json: unknown): ParsedQAFile {
       idCounts.set(id, count);
       id = `${id}.${count}`;
     }
-    return { id, question: item.question, answer: item.answer };
+    // Keep an explicit section label if the producer sent one, under either name. Without this
+    // the only section signal left is the id, which flat-id files do not carry.
+    const section = item.section ?? item.source;
+    return {
+      id,
+      question: item.question,
+      answer: item.answer,
+      ...(typeof section === "string" && section.trim() ? { section } : {}),
+    };
   });
 
   return { generated_at: obj.generated_at, model: obj.model, items };
@@ -77,17 +94,24 @@ export function formatDate(iso: string): string {
   }
 }
 
-/** Group items by section, returning entries sorted by section number */
+/**
+ * Group items into their resolved sections, in the map's order, dropping sections that no item
+ * survives the current filters in.
+ *
+ * The map is looked up, never recomputed: pass the map resolved once from the full file so the
+ * section a question sits in cannot change as the user filters.
+ */
 export function groupBySection(
-  items: QAItem[]
-): Array<{ section: string; items: QAItem[] }> {
-  const map = new Map<string, QAItem[]>();
+  items: QAItem[],
+  map: SectionMap
+): Array<{ section: SectionInfo; items: QAItem[] }> {
+  const buckets = new Map<string, QAItem[]>();
   for (const item of items) {
-    const sec = sectionOf(item.id);
-    if (!map.has(sec)) map.set(sec, []);
-    map.get(sec)!.push(item);
+    const key = sectionKeyOf(map, item);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(item);
   }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([section, items]) => ({ section, items }));
+  return map.sections
+    .filter((section) => buckets.has(section.key))
+    .map((section) => ({ section, items: buckets.get(section.key)! }));
 }

@@ -2,14 +2,44 @@ export interface QAItem {
   id: string;
   question: string;
   answer: string;
+  /**
+   * Explicit section label, when the producer supplies one. Preferred over anything derived from
+   * `id`. rag-cli calls this `source`; parseQAFile normalises both into this field.
+   */
+  section?: string;
+}
+
+/** One resolved section, real or inferred. `key` is what filters and grouping match on. */
+export interface SectionInfo {
+  key: string;
+  label: string;
+  /** True when we segmented by topic because the file carried no section signal. */
+  inferred: boolean;
+  count: number;
+}
+
+/** Resolved sections for a file, plus the item -> section lookup callers group by. */
+export interface SectionMap {
+  byItemId: Record<string, string>;
+  sections: SectionInfo[];
+}
+
+/** An item as it appears on disk, before normalisation. */
+export interface RawQAItem {
+  id: string;
+  question: string;
+  answer: string;
+  section?: string;
+  /** rag-cli's name for the section label. */
+  source?: string;
 }
 
 export interface QAFile {
   generated_at: string;
   model: string;
   /** Some files use "results", spec says "result" — we handle both */
-  results?: QAItem[];
-  result?: QAItem[];
+  results?: RawQAItem[];
+  result?: RawQAItem[];
 }
 
 export interface ParsedQAFile {
