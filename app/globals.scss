@@ -332,7 +332,11 @@
   border-radius: 0;
   color: inherit;
   font-size: 0.875rem;
-  line-height: 1;
+  // Not line-height: 1. That makes the line box exactly as tall as the font size, so descenders
+  // (the tail of a "g" in "Assignee") fall outside it and are clipped by the overflow: hidden that
+  // gives the value its ellipsis. The button's height is fixed and its children are centred, so a
+  // taller line box costs no extra box height.
+  line-height: 1.4;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
