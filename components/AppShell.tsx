@@ -78,11 +78,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [contextUrls, setContextUrls] = useState<Record<string, string>>(
     () => initialState?.contextUrls ?? {}
   );
-  const [assignees, setAssignees] = useState<Record<string, string>>(
-    () => initialState?.assignees ?? {}
+  // Keyed by section, not by question — questions are not individually assignable.
+  const [sectionAssignees, setSectionAssignees] = useState<Record<string, string>>(
+    () => initialState?.sectionAssignees ?? {}
   );
-  const [reviewers, setReviewers] = useState<Record<string, string>>(
-    () => initialState?.reviewers ?? {}
+  const [sectionReviewers, setSectionReviewers] = useState<Record<string, string>>(
+    () => initialState?.sectionReviewers ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
@@ -165,8 +166,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers((prev) => (sameMap(prev, state.editedAnswers) ? prev : state.editedAnswers));
     setRatings((prev) => (sameMap(prev, state.ratings) ? prev : state.ratings));
     setContextUrls((prev) => (sameMap(prev, state.contextUrls) ? prev : state.contextUrls));
-    setAssignees((prev) => (sameMap(prev, state.assignees) ? prev : state.assignees));
-    setReviewers((prev) => (sameMap(prev, state.reviewers) ? prev : state.reviewers));
+    setSectionAssignees((prev) =>
+      sameMap(prev, state.sectionAssignees) ? prev : state.sectionAssignees
+    );
+    setSectionReviewers((prev) =>
+      sameMap(prev, state.sectionReviewers) ? prev : state.sectionReviewers
+    );
   }, []);
 
   // One listener per doc. Keying the effect on docId makes React tear the previous listener down
@@ -206,8 +211,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers({});
     setRatings({});
     setContextUrls({});
-    setAssignees({});
-    setReviewers({});
+    setSectionAssignees({});
+    setSectionReviewers({});
   }, []);
 
   const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
@@ -234,8 +239,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       editedAnswers: {},
       ratings: {},
       contextUrls: {},
-      assignees: {},
-      reviewers: {},
+      sectionAssignees: {},
+      sectionReviewers: {},
     }).catch(() =>
       showError(
         "Live sharing may not be ready",
@@ -392,32 +397,34 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     writeToSession((sid) => clearContextUrl(sid, id));
   }, [writeToSession]);
 
-  const handleSaveAssignee = useCallback((id: string, memberId: string) => {
-    setAssignees((prev) => ({ ...prev, [id]: memberId }));
-    writeToSession((sid) => updateAssignee(sid, id, memberId));
+  // All four take a SectionInfo.key. Assignment is a property of a section, so there is no
+  // per-question path into these any more.
+  const handleSaveAssignee = useCallback((sectionKey: string, memberId: string) => {
+    setSectionAssignees((prev) => ({ ...prev, [sectionKey]: memberId }));
+    writeToSession((sid) => updateAssignee(sid, sectionKey, memberId));
   }, [writeToSession]);
 
-  const handleClearAssignee = useCallback((id: string) => {
-    setAssignees((prev) => {
+  const handleClearAssignee = useCallback((sectionKey: string) => {
+    setSectionAssignees((prev) => {
       const next = { ...prev };
-      delete next[id];
+      delete next[sectionKey];
       return next;
     });
-    writeToSession((sid) => clearAssignee(sid, id));
+    writeToSession((sid) => clearAssignee(sid, sectionKey));
   }, [writeToSession]);
 
-  const handleSaveReviewer = useCallback((id: string, memberId: string) => {
-    setReviewers((prev) => ({ ...prev, [id]: memberId }));
-    writeToSession((sid) => updateReviewer(sid, id, memberId));
+  const handleSaveReviewer = useCallback((sectionKey: string, memberId: string) => {
+    setSectionReviewers((prev) => ({ ...prev, [sectionKey]: memberId }));
+    writeToSession((sid) => updateReviewer(sid, sectionKey, memberId));
   }, [writeToSession]);
 
-  const handleClearReviewer = useCallback((id: string) => {
-    setReviewers((prev) => {
+  const handleClearReviewer = useCallback((sectionKey: string) => {
+    setSectionReviewers((prev) => {
       const next = { ...prev };
-      delete next[id];
+      delete next[sectionKey];
       return next;
     });
-    writeToSession((sid) => clearReviewer(sid, id));
+    writeToSession((sid) => clearReviewer(sid, sectionKey));
   }, [writeToSession]);
 
   const unansweredCount = useMemo(
@@ -449,10 +456,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const personFilterOptions = useMemo((): PersonFilterOption[] => {
     if (!data) return [];
 
+    // Walks sections rather than items: a role map is keyed by section now, so an entry for a
+    // section the current file does not contain must not raise a filter option.
     function distinctMemberIds(roleMap: Record<string, string>): Set<string> {
       const ids = new Set<string>();
-      for (const item of data!.items) {
-        const id = roleMap[item.id];
+      for (const section of sectionMap.sections) {
+        const id = roleMap[section.key];
         if (id) ids.add(id);
       }
       return ids;
@@ -471,10 +480,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     }
 
     return [
-      ...toOptions(distinctMemberIds(assignees), "assignee", "Assignments"),
-      ...toOptions(distinctMemberIds(reviewers), "reviewer", "Reviews"),
+      ...toOptions(distinctMemberIds(sectionAssignees), "assignee", "Assignments"),
+      ...toOptions(distinctMemberIds(sectionReviewers), "reviewer", "Reviews"),
     ];
-  }, [data, assignees, reviewers, teamMembers]);
+  }, [data, sectionAssignees, sectionReviewers, teamMembers, sectionMap]);
 
   // If the active person-filter's option disappears (e.g. their last assignment
   // was cleared), fall back to "All sections" rather than silently showing nothing.
@@ -495,11 +504,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     let matchingSections: Set<string> | null = null;
     if (section.startsWith("assignee:") || section.startsWith("reviewer:")) {
       const [kind, memberId] = section.split(":", 2);
-      const roleMap = kind === "assignee" ? assignees : reviewers;
+      const roleMap = kind === "assignee" ? sectionAssignees : sectionReviewers;
       matchingSections = new Set(
-        data.items
-          .filter((i) => roleMap[i.id] === memberId)
-          .map((i) => sectionKeyOf(sectionMap, i))
+        sectionMap.sections
+          .filter((sec) => roleMap[sec.key] === memberId)
+          .map((sec) => sec.key)
       );
     }
 
@@ -521,7 +530,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers, assignees, reviewers, sectionMap]);
+  }, [data, filters, editedAnswers, sectionAssignees, sectionReviewers, sectionMap]);
 
   const grouped = useMemo(
     () => groupBySection(filteredItems, sectionMap),
@@ -604,10 +613,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                         contextUrls={contextUrls}
                         onSaveContextUrl={handleSaveContextUrl}
                         onClearContextUrl={handleClearContextUrl}
-                        assignees={assignees}
+                        assignee={sectionAssignees[section.key]}
                         onSaveAssignee={handleSaveAssignee}
                         onClearAssignee={handleClearAssignee}
-                        reviewers={reviewers}
+                        reviewer={sectionReviewers[section.key]}
                         onSaveReviewer={handleSaveReviewer}
                         onClearReviewer={handleClearReviewer}
                         teamMembers={teamMembers}

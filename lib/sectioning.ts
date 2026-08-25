@@ -8,7 +8,7 @@
 //
 // Shape 3 is why this module exists: splitting a flat id on "." returns the id itself, so every
 // question became its own single-question section. For those files we infer contiguous topic
-// segments instead, and label them "Inferred: …" so nobody mistakes a guess for an RFP heading.
+// segments instead. Inferred sections carry an `inferred` flag but render identically to real ones.
 //
 // The output is a stable id -> section key map. Callers must resolve it once per file and never
 // per filtered subset — boundaries derived from a filtered list would move as the user types, and
@@ -16,11 +16,11 @@
 
 import type { QAItem, SectionInfo, SectionMap } from "./types";
 
-/** Hard ceiling on questions per *inferred* section. Real sections are never split. */
-export const INFERRED_SECTION_CAP = 15;
+/** Ceiling on questions per section, applied to every section — real and inferred alike. */
+export const SECTION_CAP = 10;
 
-/** A split only happens if both resulting parts reach this size; otherwise the tail folds back. */
-const MIN_PART_SIZE = 3;
+/** A final part below this size folds into the part before it rather than standing alone. */
+const MIN_FINAL_PART = 5;
 
 /** Window (in questions) either side of a gap when measuring lexical cohesion across it. */
 const BLOCK_RADIUS = 2;
@@ -301,13 +301,16 @@ function labelSegment(corpus: Corpus, start: number, end: number): string {
 // ------------------------------------------------------------------------- soft cap
 
 /**
- * Part sizes for an inferred segment of `n` questions.
+ * Part sizes for a section of `n` questions.
  *
- * Soft cap: fill to `cap`, but a trailing part below MIN_PART_SIZE folds back into the one before
- * it rather than standing as a 1-2 question orphan. So at cap 15: 16 -> [16], 18 -> [15, 3],
- * 31 -> [15, 16].
+ * Greedy fill to `cap`, except that a final part below MIN_FINAL_PART folds into the part before
+ * it rather than standing as a short tail. At cap 10: 35 -> [10,10,10,5], 34 -> [10,10,14],
+ * 15 -> [10,5], 14 -> [14], 11 -> [11].
+ *
+ * A section whose total is already at or under the cap is returned untouched, which is also what
+ * exempts a 1-4 question section from the minimum — there is nothing to fold it into.
  */
-export function partSizes(n: number, cap = INFERRED_SECTION_CAP): number[] {
+export function partSizes(n: number, cap = SECTION_CAP): number[] {
   if (n <= cap) return [n];
 
   const sizes: number[] = [];
@@ -317,7 +320,7 @@ export function partSizes(n: number, cap = INFERRED_SECTION_CAP): number[] {
     rest -= cap;
   }
   if (rest > 0) {
-    if (rest < MIN_PART_SIZE) sizes[sizes.length - 1] += rest;
+    if (rest < MIN_FINAL_PART) sizes[sizes.length - 1] += rest;
     else sizes.push(rest);
   }
   return sizes;
@@ -329,6 +332,44 @@ interface Segment {
   key: string;
   label: string;
   items: QAItem[];
+}
+
+/** A purely numeric section name numbers its parts with a decimal ("Section 3.1"). */
+function isNumericName(name: string): boolean {
+  return name !== "" && !Number.isNaN(Number(name));
+}
+
+/**
+ * Apply the section cap, numbering the parts only when a split actually happened.
+ *
+ * The trailing number marks split position, so a folded final part still carries the number of the
+ * position it occupies: a 34-question section becomes parts 1, 2 and 3, the third holding 14. A
+ * section that never splits keeps its bare name with no number at all.
+ */
+function splitIntoParts(
+  baseKey: string,
+  baseName: string,
+  items: QAItem[],
+  cap: number,
+  decimal: boolean
+): Segment[] {
+  const sizes = partSizes(items.length, cap);
+  if (sizes.length === 1) return [{ key: baseKey, label: baseName, items }];
+
+  const parts: Segment[] = [];
+  let offset = 0;
+  sizes.forEach((size, i) => {
+    const n = i + 1;
+    parts.push({
+      // The part number belongs in the key too: assignment is stored per section, and two parts of
+      // one original section are two separately assignable sections.
+      key: `${baseKey}~${n}`,
+      label: decimal ? `${baseName}.${n}` : `${baseName} ${n}`,
+      items: items.slice(offset, offset + size),
+    });
+    offset += size;
+  });
+  return parts;
 }
 
 function buildMap(segments: Segment[], inferred: boolean): SectionMap {
@@ -348,7 +389,7 @@ function buildMap(segments: Segment[], inferred: boolean): SectionMap {
   return { byItemId, sections };
 }
 
-function fromExplicit(items: QAItem[]): SectionMap {
+function fromExplicit(items: QAItem[], cap: number): SectionMap {
   // First appearance wins the ordering — an explicit label set is already in document order, and
   // these labels are rarely numeric so numeric sorting would be meaningless.
   const order: string[] = [];
@@ -361,15 +402,13 @@ function fromExplicit(items: QAItem[]): SectionMap {
     }
     buckets.get(label)!.push(item);
   }
-  const segments = order.map((label) => ({
-    key: label,
-    label,
-    items: buckets.get(label)!,
-  }));
+  const segments = order.flatMap((label) =>
+    splitIntoParts(label, label, buckets.get(label)!, cap, isNumericName(label))
+  );
   return buildMap(segments, false);
 }
 
-function fromIdHierarchy(items: QAItem[], delimiter: string): SectionMap {
+function fromIdHierarchy(items: QAItem[], delimiter: string, cap: number): SectionMap {
   const order: string[] = [];
   const buckets = new Map<string, QAItem[]>();
   for (const item of items) {
@@ -387,11 +426,17 @@ function fromIdHierarchy(items: QAItem[], delimiter: string): SectionMap {
   const allNumeric = order.every((p) => p !== "" && !Number.isNaN(Number(p)));
   const sorted = allNumeric ? [...order].sort((a, b) => Number(a) - Number(b)) : order;
 
-  const segments = sorted.map((prefix) => ({
-    key: prefix,
-    label: `Section ${prefix}`,
-    items: buckets.get(prefix)!,
-  }));
+  // A numeric prefix numbers its parts with a decimal ("Section 3.1"); a named one uses a plain
+  // trailing number ("Section CP 1"), since "Section CP.1" reads oddly.
+  const segments = sorted.flatMap((prefix) =>
+    splitIntoParts(
+      prefix,
+      `Section ${prefix}`,
+      buckets.get(prefix)!,
+      cap,
+      isNumericName(prefix)
+    )
+  );
   return buildMap(segments, false);
 }
 
@@ -403,19 +448,16 @@ function fromInference(items: QAItem[], cap: number): SectionMap {
   const segments: Segment[] = [];
   for (let c = 0; c + 1 < cuts.length; c++) {
     const [start, end] = [cuts[c], cuts[c + 1]];
-    const topic = labelSegment(corpus, start, end);
-    const sizes = partSizes(end - start, cap);
-
-    let offset = start;
-    sizes.forEach((size, p) => {
-      const suffix = sizes.length > 1 ? ` (Part ${p + 1})` : "";
-      segments.push({
-        key: `inferred:${segments.length}`,
-        label: `Inferred: ${topic}${suffix}`,
-        items: items.slice(offset, offset + size),
-      });
-      offset += size;
-    });
+    // Topic names are never numeric, so parts get a plain trailing number.
+    segments.push(
+      ...splitIntoParts(
+        `inferred:${c}`,
+        labelSegment(corpus, start, end),
+        items.slice(start, end),
+        cap,
+        false
+      )
+    );
   }
 
   return buildMap(segments, true);
@@ -430,13 +472,13 @@ function fromInference(items: QAItem[], cap: number): SectionMap {
  */
 export function resolveSections(
   items: QAItem[],
-  cap = INFERRED_SECTION_CAP
+  cap = SECTION_CAP
 ): SectionMap {
   if (items.length === 0) return { byItemId: {}, sections: [] };
-  if (hasExplicitSections(items)) return fromExplicit(items);
+  if (hasExplicitSections(items)) return fromExplicit(items, cap);
 
   const delimiter = chooseIdDelimiter(items);
-  if (delimiter !== null) return fromIdHierarchy(items, delimiter);
+  if (delimiter !== null) return fromIdHierarchy(items, delimiter, cap);
 
   return fromInference(items, cap);
 }

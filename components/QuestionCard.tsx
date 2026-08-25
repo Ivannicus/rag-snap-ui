@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import TeamMemberSelect from "./TeamMemberSelect";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem, TeamMember } from "@/lib/types";
+import type { QAItem } from "@/lib/types";
 
 interface Props {
   item: QAItem;
@@ -17,13 +16,6 @@ interface Props {
   contextUrl?: string;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
-  assignee?: string;
-  onSaveAssignee: (id: string, memberId: string) => void;
-  onClearAssignee: (id: string) => void;
-  reviewer?: string;
-  onSaveReviewer: (id: string, memberId: string) => void;
-  onClearReviewer: (id: string) => void;
-  teamMembers: TeamMember[];
 }
 
 /** Highlight search term occurrences in text */
@@ -220,43 +212,6 @@ function ContextUrlRow({
   );
 }
 
-function AssignmentRow({
-  assignee,
-  reviewer,
-  teamMembers,
-  onSaveAssignee,
-  onClearAssignee,
-  onSaveReviewer,
-  onClearReviewer,
-}: {
-  assignee?: string;
-  reviewer?: string;
-  teamMembers: TeamMember[];
-  onSaveAssignee: (memberId: string) => void;
-  onClearAssignee: () => void;
-  onSaveReviewer: (memberId: string) => void;
-  onClearReviewer: () => void;
-}) {
-  return (
-    <div className="assignment-row">
-      <TeamMemberSelect
-        label="Assignee:"
-        value={assignee}
-        teamMembers={teamMembers}
-        onSelect={onSaveAssignee}
-        onClear={onClearAssignee}
-      />
-      <TeamMemberSelect
-        label="Reviewer:"
-        value={reviewer}
-        teamMembers={teamMembers}
-        onSelect={onSaveReviewer}
-        onClear={onClearReviewer}
-      />
-    </div>
-  );
-}
-
 export default function QuestionCard({
   item,
   searchTerm = "",
@@ -269,13 +224,6 @@ export default function QuestionCard({
   contextUrl,
   onSaveContextUrl,
   onClearContextUrl,
-  assignee,
-  onSaveAssignee,
-  onClearAssignee,
-  reviewer,
-  onSaveReviewer,
-  onClearReviewer,
-  teamMembers,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -478,20 +426,6 @@ export default function QuestionCard({
               </button>
             )
           )}
-
-          {/* ── Assignment ── */}
-          <div className="question-card__section">
-            <p className="p-text--small-caps">Assignment</p>
-            <AssignmentRow
-              assignee={assignee}
-              reviewer={reviewer}
-              teamMembers={teamMembers}
-              onSaveAssignee={(memberId) => onSaveAssignee(item.id, memberId)}
-              onClearAssignee={() => onClearAssignee(item.id)}
-              onSaveReviewer={(memberId) => onSaveReviewer(item.id, memberId)}
-              onClearReviewer={() => onClearReviewer(item.id)}
-            />
-          </div>
 
           {/* ── Context URL — only for originally unanswered questions ── */}
           {unanswered && (

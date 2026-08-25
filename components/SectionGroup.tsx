@@ -1,7 +1,7 @@
 "use client";
 
 import QuestionCard from "./QuestionCard";
-import TeamMemberAvatar from "./TeamMemberAvatar";
+import TeamMemberSelect from "./TeamMemberSelect";
 import { isUnanswered } from "@/lib/utils";
 import type { QAItem, SectionInfo, TeamMember } from "@/lib/types";
 
@@ -18,12 +18,13 @@ interface Props {
   contextUrls: Record<string, string>;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
-  assignees: Record<string, string>;
-  onSaveAssignee: (id: string, memberId: string) => void;
-  onClearAssignee: (id: string) => void;
-  reviewers: Record<string, string>;
-  onSaveReviewer: (id: string, memberId: string) => void;
-  onClearReviewer: (id: string) => void;
+  /** This section's assignee/reviewer. Assignment is per section, not per question. */
+  assignee?: string;
+  onSaveAssignee: (sectionKey: string, memberId: string) => void;
+  onClearAssignee: (sectionKey: string) => void;
+  reviewer?: string;
+  onSaveReviewer: (sectionKey: string, memberId: string) => void;
+  onClearReviewer: (sectionKey: string) => void;
   teamMembers: TeamMember[];
 }
 
@@ -40,10 +41,10 @@ export default function SectionGroup({
   contextUrls,
   onSaveContextUrl,
   onClearContextUrl,
-  assignees,
+  assignee,
   onSaveAssignee,
   onClearAssignee,
-  reviewers,
+  reviewer,
   onSaveReviewer,
   onClearReviewer,
   teamMembers,
@@ -54,53 +55,30 @@ export default function SectionGroup({
   const answeredCount = items.length - unansweredCount;
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
-  const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
-  const assigneeMember = teamMembers.find((m) => m.id === assigneeId);
-
-  const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
-  const reviewerMember = teamMembers.find((m) => m.id === reviewerId);
-
   return (
     <div>
       {/* Section header */}
       <div className="section-header">
         <span className="p-heading--5 u-no-margin--bottom">{section.label}</span>
-        {/* An inferred section is our topic guess, not a heading from the RFP. Say so, so nobody
-            treats the boundary as authoritative when assigning work against it. */}
-        {section.inferred && (
-          <span
-            className="section-header__block section-header__block--caution"
-            title="No section data in this file — questions grouped by topic similarity"
-          >
-            Inferred grouping
-          </span>
-        )}
-        <span className="section-header__block">
-          Assignee:
-          <span className="section-header__assignment">
-            {assigneeMember ? (
-              <>
-                <TeamMemberAvatar member={assigneeMember} size="small" />
-                {assigneeMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
-        </span>
-        <span className="section-header__block">
-          Reviewer:
-          <span className="section-header__assignment">
-            {reviewerMember ? (
-              <>
-                <TeamMemberAvatar member={reviewerMember} size="small" />
-                {reviewerMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
-        </span>
+
+        {/* Assignee and reviewer, one clickable box each. Both read straight off the section's
+            identity, so every question in the section shows the same assignment however the list
+            is filtered. */}
+        <TeamMemberSelect
+          label="Assignee:"
+          value={assignee}
+          teamMembers={teamMembers}
+          onSelect={(memberId) => onSaveAssignee(section.key, memberId)}
+          onClear={() => onClearAssignee(section.key)}
+        />
+        <TeamMemberSelect
+          label="Reviewer:"
+          value={reviewer}
+          teamMembers={teamMembers}
+          onSelect={(memberId) => onSaveReviewer(section.key, memberId)}
+          onClear={() => onClearReviewer(section.key)}
+        />
+
         <span className="section-header__block">
           {items.length} {items.length === 1 ? "Question" : "Questions"}
         </span>
@@ -138,13 +116,6 @@ export default function SectionGroup({
             contextUrl={contextUrls[item.id]}
             onSaveContextUrl={onSaveContextUrl}
             onClearContextUrl={onClearContextUrl}
-            assignee={assignees[item.id]}
-            onSaveAssignee={onSaveAssignee}
-            onClearAssignee={onClearAssignee}
-            reviewer={reviewers[item.id]}
-            onSaveReviewer={onSaveReviewer}
-            onClearReviewer={onClearReviewer}
-            teamMembers={teamMembers}
           />
         ))}
       </div>

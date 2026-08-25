@@ -105,8 +105,8 @@ export default function FilterBar({
             </optgroup>
           )}
           <optgroup label="Filter by section">
-            {/* sec.label already reads as a heading ("Section 3", "Inferred: Active Directory"),
-                so it is rendered verbatim rather than prefixed here. */}
+            {/* sec.label already reads as a heading ("Section 3.2", "Active Directory"), so it is
+                rendered verbatim rather than prefixed here. */}
             {sections.map((sec) => (
               <option key={sec.key} value={sec.key}>
                 {sec.label}

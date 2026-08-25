@@ -40,8 +40,8 @@ function toSessionState(data: ParsedQAFile, filename: string): SessionState {
     editedAnswers: {},
     ratings: {},
     contextUrls: {},
-    assignees: {},
-    reviewers: {},
+    sectionAssignees: {},
+    sectionReviewers: {},
   };
 }
 

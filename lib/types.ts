@@ -52,9 +52,9 @@ export type FilterStatus = "all" | "answered" | "unanswered";
 
 export interface Filters {
   status: FilterStatus;
-  // "" = all sections; a plain section number (e.g. "1") = that section;
-  // "assignee:<TeamMember.id>" / "reviewer:<TeamMember.id>" = sections containing
-  // at least one item where that member is the assignee/reviewer
+  // "" = all sections; otherwise a SectionInfo.key (e.g. "1", "CP", "3~2", "inferred:4");
+  // "assignee:<TeamMember.id>" / "reviewer:<TeamMember.id>" = the sections that member
+  // is the assignee/reviewer of
   section: string;
   search: string;
 }
@@ -70,8 +70,11 @@ export interface SessionState {
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
   contextUrls: Record<string, string>;
-  assignees: Record<string, string>; // item.id -> TeamMember.id
-  reviewers: Record<string, string>; // item.id -> TeamMember.id
+  // Keyed by SectionInfo.key, not item.id — questions are not individually assignable. Stored
+  // under the sectionAssignees/sectionReviewers RTDB nodes; the older item-keyed assignees/
+  // reviewers nodes are obsolete and deliberately not read.
+  sectionAssignees: Record<string, string>; // SectionInfo.key -> TeamMember.id
+  sectionReviewers: Record<string, string>; // SectionInfo.key -> TeamMember.id
 }
 
 export interface TeamMember {
