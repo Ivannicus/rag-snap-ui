@@ -7,16 +7,6 @@ export function isUnanswered(answer: string): boolean {
   return answer.trimStart().startsWith(UNANSWERED_PREFIX);
 }
 
-/**
- * Extract the section part of a hierarchical id like "1.2" → "1".
- *
- * Only meaningful for ids that actually are hierarchical. For a flat id ("7") this returns the id
- * itself, which is why it must not be used as a grouping key on its own — see lib/sectioning.ts.
- */
-export function sectionOf(id: string): string {
-  return id.split(".")[0];
-}
-
 /** Sections available for the filter dropdown, in resolved order. */
 export function getSections(map: SectionMap): SectionInfo[] {
   return map.sections;

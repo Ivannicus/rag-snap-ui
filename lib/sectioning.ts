@@ -15,7 +15,6 @@
 // assignment/reviewer state keys off section identity.
 
 import type { QAItem, SectionInfo, SectionMap } from "./types";
-import { sectionOf } from "./utils";
 
 /** Hard ceiling on questions per *inferred* section. Real sections are never split. */
 export const INFERRED_SECTION_CAP = 15;
@@ -47,12 +46,39 @@ function hasExplicitSections(items: QAItem[]): boolean {
 }
 
 /**
- * Ids are a usable hierarchy only if they actually collapse items into fewer buckets. When every
- * id yields its own prefix there is no grouping signal in them, whatever their format.
+ * Separators an id may use between its section part and its question part, in precedence order.
+ *
+ * Order only decides ties on bucket count. Period leads because it is the documented format;
+ * hyphen next, since "CP-01"/"MP-13" style ids are common in RFP exports. On a tie the earlier
+ * delimiter wins, which keeps the fuller prefix ("CSR_Digital_Sobriety" over "CSR").
  */
-function hasIdHierarchy(items: QAItem[]): boolean {
-  const prefixes = new Set(items.map((i) => sectionOf(i.id)));
-  return prefixes.size < items.length;
+const ID_DELIMITERS = [".", "-", "_", ":", "/", " "] as const;
+
+function prefixOf(id: string, delimiter: string): string {
+  return id.split(delimiter)[0];
+}
+
+/**
+ * Pick the delimiter whose prefixes collapse the items into the fewest buckets, or null when no
+ * delimiter collapses them at all.
+ *
+ * A delimiter that does not appear in the ids is self-eliminating: split returns each id whole, so
+ * the bucket count equals the item count and the collapse guard rejects it. That is what keeps a
+ * genuinely flat file ("1".."56") falling through to inference no matter how many delimiters we
+ * try — widening this list can only ever rescue ids that really do carry a separator.
+ *
+ * One bucket counts as signal, not noise: rag-cli's per-section exports give every item the same
+ * id, and those files are legitimately a single section.
+ */
+function chooseIdDelimiter(items: QAItem[]): string | null {
+  let best: { delimiter: string; size: number } | null = null;
+  for (const delimiter of ID_DELIMITERS) {
+    const size = new Set(items.map((i) => prefixOf(i.id, delimiter))).size;
+    if (size >= items.length) continue; // no collapse — no grouping signal
+    // Strictly-less keeps the earlier, higher-precedence delimiter when counts tie.
+    if (best === null || size < best.size) best = { delimiter, size };
+  }
+  return best?.delimiter ?? null;
 }
 
 // ------------------------------------------------------------------- tier 2: tokenising
@@ -300,24 +326,24 @@ export function partSizes(n: number, cap = INFERRED_SECTION_CAP): number[] {
 // ---------------------------------------------------------------------------- assembly
 
 interface Segment {
+  key: string;
   label: string;
   items: QAItem[];
 }
 
-function buildMap(segments: Segment[], keyFor: (s: Segment, i: number) => string): SectionMap {
+function buildMap(segments: Segment[], inferred: boolean): SectionMap {
   const byItemId: Record<string, string> = {};
   const sections: SectionInfo[] = [];
 
-  segments.forEach((seg, i) => {
-    const key = keyFor(seg, i);
+  for (const seg of segments) {
     sections.push({
-      key,
+      key: seg.key,
       label: seg.label,
-      inferred: key.startsWith("inferred:"),
+      inferred,
       count: seg.items.length,
     });
-    for (const item of seg.items) byItemId[item.id] = key;
-  });
+    for (const item of seg.items) byItemId[item.id] = seg.key;
+  }
 
   return { byItemId, sections };
 }
@@ -335,15 +361,19 @@ function fromExplicit(items: QAItem[]): SectionMap {
     }
     buckets.get(label)!.push(item);
   }
-  const segments = order.map((label) => ({ label, items: buckets.get(label)! }));
-  return buildMap(segments, (s) => s.label);
+  const segments = order.map((label) => ({
+    key: label,
+    label,
+    items: buckets.get(label)!,
+  }));
+  return buildMap(segments, false);
 }
 
-function fromIdHierarchy(items: QAItem[]): SectionMap {
+function fromIdHierarchy(items: QAItem[], delimiter: string): SectionMap {
   const order: string[] = [];
   const buckets = new Map<string, QAItem[]>();
   for (const item of items) {
-    const prefix = sectionOf(item.id);
+    const prefix = prefixOf(item.id, delimiter);
     if (!buckets.has(prefix)) {
       buckets.set(prefix, []);
       order.push(prefix);
@@ -358,10 +388,11 @@ function fromIdHierarchy(items: QAItem[]): SectionMap {
   const sorted = allNumeric ? [...order].sort((a, b) => Number(a) - Number(b)) : order;
 
   const segments = sorted.map((prefix) => ({
+    key: prefix,
     label: `Section ${prefix}`,
     items: buckets.get(prefix)!,
   }));
-  return buildMap(segments, (s) => s.label.slice("Section ".length));
+  return buildMap(segments, false);
 }
 
 function fromInference(items: QAItem[], cap: number): SectionMap {
@@ -379,6 +410,7 @@ function fromInference(items: QAItem[], cap: number): SectionMap {
     sizes.forEach((size, p) => {
       const suffix = sizes.length > 1 ? ` (Part ${p + 1})` : "";
       segments.push({
+        key: `inferred:${segments.length}`,
         label: `Inferred: ${topic}${suffix}`,
         items: items.slice(offset, offset + size),
       });
@@ -386,7 +418,7 @@ function fromInference(items: QAItem[], cap: number): SectionMap {
     });
   }
 
-  return buildMap(segments, (_s, i) => `inferred:${i}`);
+  return buildMap(segments, true);
 }
 
 /**
@@ -402,6 +434,9 @@ export function resolveSections(
 ): SectionMap {
   if (items.length === 0) return { byItemId: {}, sections: [] };
   if (hasExplicitSections(items)) return fromExplicit(items);
-  if (hasIdHierarchy(items)) return fromIdHierarchy(items);
+
+  const delimiter = chooseIdDelimiter(items);
+  if (delimiter !== null) return fromIdHierarchy(items, delimiter);
+
   return fromInference(items, cap);
 }
