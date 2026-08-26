@@ -32,7 +32,7 @@ interface PendingPayload {
 }
 
 // Build a fresh SessionState for a handed-off batch — the results plus empty overlay maps, since a
-// brand-new import carries no edits/ratings/assignments yet.
+// brand-new import carries no edits/ratings/assignments yet, and nothing arrives pre-approved.
 function toSessionState(data: ParsedQAFile, filename: string): SessionState {
   return {
     data,
@@ -40,6 +40,7 @@ function toSessionState(data: ParsedQAFile, filename: string): SessionState {
     editedAnswers: {},
     ratings: {},
     contextUrls: {},
+    approvals: {},
     sectionAssignees: {},
     sectionReviewers: {},
   };

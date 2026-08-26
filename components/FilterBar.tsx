@@ -11,9 +11,11 @@ interface Props {
   totalCount: number;
 }
 
+// "Approved" means human-approved, not "the model produced an answer". Questions that have an answer
+// nobody has signed off on yet are only reachable through "All".
 const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "answered", label: "Answered" },
+  { value: "approved", label: "Approved" },
   { value: "unanswered", label: "Unanswered" },
 ];
 
@@ -67,7 +69,7 @@ export default function FilterBar({
                   filters.status === value
                     ? value === "unanswered"
                       ? "p-button--negative"
-                      : value === "answered"
+                      : value === "approved"
                       ? "p-button--positive"
                       : "p-button--brand"
                     : "p-button--base"

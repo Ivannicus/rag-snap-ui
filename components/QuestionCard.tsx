@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { isUnanswered } from "@/lib/utils";
+import { isUnanswered, questionState } from "@/lib/utils";
 import type { QAItem } from "@/lib/types";
 
 interface Props {
@@ -16,6 +16,12 @@ interface Props {
   contextUrl?: string;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
+  /** True once a human has approved this answer. Cleared by AppShell whenever the answer changes. */
+  approved: boolean;
+  onSetApproved: (id: string, approved: boolean) => void;
+  /** Expansion is owned by AppShell, so it outlives this card's mount and is remembered per doc. */
+  open: boolean;
+  onSetOpen: (id: string, open: boolean) => void;
 }
 
 /** Highlight search term occurrences in text */
@@ -224,19 +230,25 @@ export default function QuestionCard({
   contextUrl,
   onSaveContextUrl,
   onClearContextUrl,
+  approved,
+  onSetApproved,
+  open,
+  onSetOpen,
 }: Props) {
-  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [confirmingRevert, setConfirmingRevert] = useState(false);
 
+  // Raw, not effective: the context URL row and the greyed rating stars key off the *original*
+  // answer being absent, which an edit does not change.
   const unanswered = isUnanswered(item.answer);
   const hasEdit = editedAnswer !== undefined;
+  const state = questionState(item.answer, editedAnswer, approved);
 
   function startEdit() {
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
-    setOpen(true);
+    onSetOpen(item.id, true);
   }
 
   function saveEdit() {
@@ -262,24 +274,23 @@ export default function QuestionCard({
 
   return (
     <>
+    {/* The box hue *is* the state readout — red unanswered, blue ready, green approved — so there is
+        no per-question state badge. The amber edited border only applies while a question is ready:
+        once approved, green wins outright however the answer got there. */}
     <div
-      className={`p-card question-card ${
-        unanswered && !hasEdit
-          ? "question-card--unanswered"
-          : hasEdit
-          ? "question-card--edited"
-          : ""
+      className={`p-card question-card question-card--${state}${
+        state === "ready" && hasEdit ? " question-card--edited" : ""
       }`}
     >
       {/* Question row — clickable to expand */}
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => onSetOpen(item.id, !open)}
         className="question-card__header"
       >
         {/* ID badge */}
         <span
           className={`question-card__id-badge ${
-            unanswered && !hasEdit ? "question-card__id-badge--negative" : ""
+            state === "unanswered" ? "question-card__id-badge--negative" : ""
           }`}
         >
           {item.id}
@@ -439,8 +450,8 @@ export default function QuestionCard({
             </div>
           )}
 
-          {/* ── Rating ── */}
-          <div className="question-card__section">
+          {/* ── Rating, with approval in the far corner ── */}
+          <div className="question-card__section question-card__footer-row">
             {unanswered && !hasEdit ? (
               <div className="star-rating">
                 <span className="u-text--muted p-text--small u-no-margin--bottom">Rate:</span>
@@ -460,6 +471,34 @@ export default function QuestionCard({
                 onClear={() => onClearRating(item.id)}
               />
             )}
+
+            {/* Approval toggle. Always rendered, disabled rather than hidden on an unanswered
+                question: there is nothing to sign off on, and saying so is more use than an empty
+                corner. Reachable only with the card open, which is the point — approving means
+                having read the answer. */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onSetApproved(item.id, !approved); }}
+              disabled={state === "unanswered"}
+              aria-pressed={approved}
+              title={
+                state === "unanswered"
+                  ? "Nothing to approve — this question has no answer"
+                  : approved
+                  ? "Approved. Click to send it back to Ready"
+                  : "Approve this answer"
+              }
+              className={`question-card__approve ${
+                approved ? "question-card__approve--approved" : ""
+              }`}
+            >
+              {approved ? (
+                <>
+                  <i className="p-icon--success"></i> Approved
+                </>
+              ) : (
+                "Approve"
+              )}
+            </button>
           </div>
         </div>
       </div>

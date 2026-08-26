@@ -48,7 +48,11 @@ export interface ParsedQAFile {
   items: QAItem[];
 }
 
-export type FilterStatus = "all" | "answered" | "unanswered";
+/**
+ * "answered" used to mean "the model produced an answer". Approval split that in two: an answer the
+ * model produced is `ready`, and only a human clicking Approve makes it `approved`.
+ */
+export type FilterStatus = "all" | "approved" | "unanswered";
 
 export interface Filters {
   status: FilterStatus;
@@ -70,6 +74,10 @@ export interface SessionState {
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
   contextUrls: Record<string, string>;
+  // Human approvals, keyed by item.id. Present means approved; the key is removed to un-approve, so
+  // there is no `false` to distinguish from absent. Editing an answer removes it — an approval
+  // stands for the text that was read, not for the question.
+  approvals: Record<string, true>;
   // Keyed by SectionInfo.key, not item.id — questions are not individually assignable. Stored
   // under the sectionAssignees/sectionReviewers RTDB nodes; the older item-keyed assignees/
   // reviewers nodes are obsolete and deliberately not read.

@@ -7,6 +7,35 @@ export function isUnanswered(answer: string): boolean {
   return answer.trimStart().startsWith(UNANSWERED_PREFIX);
 }
 
+/**
+ * The three states a question can be in.
+ *
+ * `unanswered` — no answer text to work with. Cannot be approved.
+ * `ready`      — there is answer text, but no human has signed off on it. Every answered question
+ *                starts here, including one whose text arrived via an edit.
+ * `approved`   — a human clicked Approve. The only state that is not derived from the file.
+ */
+export type QuestionState = "unanswered" | "ready" | "approved";
+
+/**
+ * Derive a question's state. The single definition — badges, counters, box hue and the status filter
+ * all read this, so none of them can drift from the others.
+ *
+ * An edit outranks the unanswered prefix, matching the behaviour this replaces: supplying text for a
+ * question the model could not answer makes it answerable, and therefore approvable.
+ */
+export function questionState(
+  answer: string,
+  editedAnswer: string | undefined,
+  approved: boolean
+): QuestionState {
+  if (editedAnswer === undefined && isUnanswered(answer)) return "unanswered";
+  // Defensive: an approval can only be set on text that existed, but a session written by an older
+  // build could hold one for a question that is now unanswered. State ignores it rather than
+  // rendering a green box with nothing in it.
+  return approved ? "approved" : "ready";
+}
+
 /** Sections available for the filter dropdown, in resolved order. */
 export function getSections(map: SectionMap): SectionInfo[] {
   return map.sections;

@@ -70,6 +70,7 @@ export async function ensureSession(sessionId: string, state: SessionState): Pro
       editedAnswers: encodeKeys(state.editedAnswers),
       ratings: encodeKeys(state.ratings),
       contextUrls: encodeKeys(state.contextUrls),
+      approvals: encodeKeys(state.approvals),
       sectionAssignees: encodeKeys(state.sectionAssignees),
       sectionReviewers: encodeKeys(state.sectionReviewers),
       createdAt,
@@ -94,6 +95,9 @@ export function subscribeToSession(
         editedAnswers: decodeKeys(val.editedAnswers ?? {}),
         ratings: decodeKeys(val.ratings ?? {}),
         contextUrls: decodeKeys(val.contextUrls ?? {}),
+        // A session written before approval existed has no node here, so it opens with everything
+        // ready and nothing approved — which is exactly the right starting point.
+        approvals: decodeKeys(val.approvals ?? {}),
         // Only the section-keyed nodes are read. A session written before assignment moved from
         // questions to sections still holds item-keyed assignees/reviewers; those are obsolete and
         // left untouched rather than migrated, so such a session opens with every section
@@ -127,6 +131,18 @@ export function updateContextUrl(sessionId: string, itemId: string, url: string)
 
 export function clearContextUrl(sessionId: string, itemId: string) {
   return remove(ref(db, `sessions/${sessionId}/contextUrls/${encodeKey(itemId)}`));
+}
+
+/**
+ * Approve one question. Writes `true`; un-approving removes the key rather than writing `false`, so
+ * the node only ever holds the questions that are actually approved.
+ */
+export function updateApproval(sessionId: string, itemId: string) {
+  return update(ref(db, `sessions/${sessionId}/approvals`), { [encodeKey(itemId)]: true });
+}
+
+export function clearApproval(sessionId: string, itemId: string) {
+  return remove(ref(db, `sessions/${sessionId}/approvals/${encodeKey(itemId)}`));
 }
 
 export function updateAssignee(sessionId: string, sectionKey: string, memberId: string) {

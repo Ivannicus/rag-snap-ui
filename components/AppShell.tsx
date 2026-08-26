@@ -7,7 +7,7 @@ import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
-import { groupBySection, getSections, isUnanswered, sectionKeyOf } from "@/lib/utils";
+import { groupBySection, getSections, questionState, sectionKeyOf } from "@/lib/utils";
 import { resolveSections } from "@/lib/sectioning";
 import {
   ensureSession,
@@ -18,6 +18,8 @@ import {
   clearRating,
   updateContextUrl,
   clearContextUrl,
+  updateApproval,
+  clearApproval,
   updateAssignee,
   clearAssignee,
   updateReviewer,
@@ -25,6 +27,12 @@ import {
 } from "@/lib/session";
 import { getSavedFile } from "@/lib/savedFiles";
 import { subscribeToTeamMembers } from "@/lib/teamBank";
+import {
+  loadViewState,
+  saveViewState,
+  EMPTY_VIEW_STATE,
+  type DocViewState,
+} from "@/lib/expansion";
 import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
@@ -78,6 +86,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [contextUrls, setContextUrls] = useState<Record<string, string>>(
     () => initialState?.contextUrls ?? {}
   );
+  // Approved question ids. Present means approved; there is no `false`, so an absent id is "ready".
+  const [approvals, setApprovals] = useState<Record<string, true>>(
+    () => initialState?.approvals ?? {}
+  );
   // Keyed by section, not by question — questions are not individually assignable.
   const [sectionAssignees, setSectionAssignees] = useState<Record<string, string>>(
     () => initialState?.sectionAssignees ?? {}
@@ -86,6 +98,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     () => initialState?.sectionReviewers ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  // Which cards are expanded and which sections are collapsed. Held here rather than inside each
+  // card or section so it survives the remount a doc switch or a filter change causes, and so it
+  // can be restored for the doc being opened.
+  const [viewState, setViewState] = useState<DocViewState>(EMPTY_VIEW_STATE);
   // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
   // doc always joins the same room instead of minting a new random session.
   const [docId, setDocId] = useState<string | null>(null);
@@ -110,6 +126,71 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   useEffect(() => {
     docIdRef.current = docId;
   }, [docId]);
+
+  // Mirrors `approvals` for the edit handlers, which need to know whether a question was approved
+  // before its answer changed without taking a render to find out. Kept in step by every writer
+  // below and by the remote-snapshot effect.
+  const approvalsRef = useRef<Record<string, true>>({});
+  useEffect(() => {
+    approvalsRef.current = approvals;
+  }, [approvals]);
+
+  // Authoritative copy of `viewState`, kept in step synchronously by every writer below. The toggle
+  // handlers need the current sets to derive the next ones *and* to persist them in the same call,
+  // which reading through the state setter cannot give them.
+  const viewRef = useRef<DocViewState>(EMPTY_VIEW_STATE);
+
+  // Restore how this doc was left. Keyed on docId so a switch loads the incoming doc's view instead
+  // of carrying the previous doc's open cards across; closing a doc goes back to the defaults.
+  useEffect(() => {
+    const restored = docId ? loadViewState(docId) : EMPTY_VIEW_STATE;
+    viewRef.current = restored;
+    setViewState(restored);
+  }, [docId]);
+
+  /**
+   * Record a change to what is open.
+   *
+   * Persisted per doc on every change rather than on unload — there is no reliable moment to save on
+   * the way out of a static page, and the writes are one small key each.
+   */
+  const commitViewState = useCallback(
+    (next: DocViewState) => {
+      viewRef.current = next;
+      setViewState(next);
+      // No doc id means the postMessage import path, which has no identity to file this under. The
+      // toggles still work for the visit, they just are not remembered.
+      if (docId) saveViewState(docId, next);
+    },
+    [docId]
+  );
+
+  /** Open or close one card. */
+  const handleSetExpanded = useCallback(
+    (id: string, open: boolean) => {
+      const expandedQuestions = { ...viewRef.current.expandedQuestions };
+      if (open) expandedQuestions[id] = true;
+      else delete expandedQuestions[id];
+      commitViewState({ ...viewRef.current, expandedQuestions });
+    },
+    [commitViewState]
+  );
+
+  /**
+   * Show or hide one section's questions.
+   *
+   * Only the section's own key moves. The cards' expansion is a separate set, so collapsing a
+   * section hides whatever was open inside it and expanding it again brings that back unchanged.
+   */
+  const handleSetSectionOpen = useCallback(
+    (sectionKey: string, open: boolean) => {
+      const collapsedSections = { ...viewRef.current.collapsedSections };
+      if (open) delete collapsedSections[sectionKey];
+      else collapsedSections[sectionKey] = true;
+      commitViewState({ ...viewRef.current, collapsedSections });
+    },
+    [commitViewState]
+  );
 
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
@@ -166,6 +247,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers((prev) => (sameMap(prev, state.editedAnswers) ? prev : state.editedAnswers));
     setRatings((prev) => (sameMap(prev, state.ratings) ? prev : state.ratings));
     setContextUrls((prev) => (sameMap(prev, state.contextUrls) ? prev : state.contextUrls));
+    setApprovals((prev) => (sameMap(prev, state.approvals) ? prev : state.approvals));
     setSectionAssignees((prev) =>
       sameMap(prev, state.sectionAssignees) ? prev : state.sectionAssignees
     );
@@ -211,6 +293,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers({});
     setRatings({});
     setContextUrls({});
+    setApprovals({});
+    approvalsRef.current = {};
     setSectionAssignees({});
     setSectionReviewers({});
   }, []);
@@ -239,6 +323,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       editedAnswers: {},
       ratings: {},
       contextUrls: {},
+      approvals: {},
       sectionAssignees: {},
       sectionReviewers: {},
     }).catch(() =>
@@ -369,10 +454,44 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     writeToSession((sid) => clearRating(sid, id));
   }, [writeToSession]);
 
+  /**
+   * Set or clear one question's approval.
+   *
+   * Approving is a collaborative act, so it goes to the room like an edit does — everyone in the
+   * session sees the box turn green.
+   */
+  const handleSetApproved = useCallback(
+    (id: string, approved: boolean) => {
+      const next = { ...approvalsRef.current };
+      if (approved) next[id] = true;
+      else delete next[id];
+      approvalsRef.current = next;
+      setApprovals(next);
+      writeToSession((sid) => (approved ? updateApproval(sid, id) : clearApproval(sid, id)));
+    },
+    [writeToSession]
+  );
+
+  /**
+   * Withdraw an approval because the answer text changed under it.
+   *
+   * An approval means a human read *that text* and signed off on it, so any change to the effective
+   * answer — saving an edit, or reverting one — sends the question back to Ready for a fresh look.
+   * Silent about it when the question was not approved, which is the common case.
+   */
+  const revokeApprovalForEdit = useCallback(
+    (id: string) => {
+      if (!approvalsRef.current[id]) return;
+      handleSetApproved(id, false);
+    },
+    [handleSetApproved]
+  );
+
   const handleSaveEdit = useCallback((id: string, answer: string) => {
     setEditedAnswers((prev) => ({ ...prev, [id]: answer }));
     writeToSession((sid) => updateAnswer(sid, id, answer));
-  }, [writeToSession]);
+    revokeApprovalForEdit(id);
+  }, [writeToSession, revokeApprovalForEdit]);
 
   const handleClearEdit = useCallback((id: string) => {
     setEditedAnswers((prev) => {
@@ -380,8 +499,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
+    revokeApprovalForEdit(id);
     writeToSession((sid) => clearAnswer(sid, id));
-  }, [writeToSession]);
+  }, [writeToSession, revokeApprovalForEdit]);
 
   const handleSaveContextUrl = useCallback((id: string, url: string) => {
     setContextUrls((prev) => ({ ...prev, [id]: url }));
@@ -427,15 +547,14 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     writeToSession((sid) => clearReviewer(sid, sectionKey));
   }, [writeToSession]);
 
-  const unansweredCount = useMemo(
-    () =>
-      data
-        ? data.items.filter(
-            (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
-          ).length
-        : 0,
-    [data, editedAnswers]
-  );
+  /** The three tallies the top bar reports, counted once over the whole file. */
+  const stateCounts = useMemo(() => {
+    const counts = { unanswered: 0, ready: 0, approved: 0 };
+    for (const item of data?.items ?? []) {
+      counts[questionState(item.answer, editedAnswers[item.id], approvals[item.id] === true)]++;
+    }
+    return counts;
+  }, [data, editedAnswers, approvals]);
 
   /**
    * Sections are resolved once per file, from the *full* item list.
@@ -514,10 +633,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
     return data.items.filter((item) => {
       const effectiveAnswer = editedAnswers[item.id] ?? item.answer;
-      const effectivelyUnanswered =
-        isUnanswered(item.answer) && !editedAnswers[item.id];
-      if (status === "answered" && effectivelyUnanswered) return false;
-      if (status === "unanswered" && !effectivelyUnanswered) return false;
+      // "Approved" is a human sign-off now, not "the model answered it", so this filter no longer
+      // matches a question just because it has answer text. Ready questions are reachable through
+      // "All".
+      const state = questionState(
+        item.answer,
+        editedAnswers[item.id],
+        approvals[item.id] === true
+      );
+      if (status === "approved" && state !== "approved") return false;
+      if (status === "unanswered" && state !== "unanswered") return false;
       if (matchingSections) {
         if (!matchingSections.has(sectionKeyOf(sectionMap, item))) return false;
       } else if (section && sectionKeyOf(sectionMap, item) !== section) {
@@ -530,7 +655,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers, sectionAssignees, sectionReviewers, sectionMap]);
+  }, [data, filters, editedAnswers, approvals, sectionAssignees, sectionReviewers, sectionMap]);
 
   const grouped = useMemo(
     () => groupBySection(filteredItems, sectionMap),
@@ -552,7 +677,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         <Header
           data={data}
           filename={filename}
-          unansweredCount={unansweredCount}
+          readyCount={stateCounts.ready}
+          approvedCount={stateCounts.approved}
+          unansweredCount={stateCounts.unanswered}
           totalCount={data?.items.length ?? 0}
           onLoad={handleLoad}
           teamMembers={teamMembers}
@@ -613,6 +740,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                         contextUrls={contextUrls}
                         onSaveContextUrl={handleSaveContextUrl}
                         onClearContextUrl={handleClearContextUrl}
+                        approvals={approvals}
+                        onSetApproved={handleSetApproved}
+                        expandedIds={viewState.expandedQuestions}
+                        onSetExpanded={handleSetExpanded}
+                        open={viewState.collapsedSections[section.key] !== true}
+                        onSetOpen={handleSetSectionOpen}
                         assignee={sectionAssignees[section.key]}
                         onSaveAssignee={handleSaveAssignee}
                         onClearAssignee={handleClearAssignee}
