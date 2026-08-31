@@ -477,7 +477,8 @@ export default function QuestionCard({
                 corner. Reachable only with the card open, which is the point — approving means
                 having read the answer. */}
             <button
-              onClick={(e) => { e.stopPropagation(); onSetApproved(item.id, !approved); }}
+              type="button"
+              onClick={() => onSetApproved(item.id, !approved)}
               disabled={state === "unanswered"}
               aria-pressed={approved}
               title={

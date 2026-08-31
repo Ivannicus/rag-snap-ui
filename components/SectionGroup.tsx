@@ -135,6 +135,7 @@ export default function SectionGroup({
 
         {/* Whole-section toggle. Last in the row, past the rule, so it sits at the right edge. */}
         <button
+          type="button"
           onClick={() => onSetOpen(section.key, !open)}
           aria-expanded={open}
           aria-controls={panelId}

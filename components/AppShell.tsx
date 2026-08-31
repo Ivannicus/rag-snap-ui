@@ -7,7 +7,7 @@ import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
-import { groupBySection, getSections, questionState, sectionKeyOf } from "@/lib/utils";
+import { groupBySection, questionState, sectionKeyOf } from "@/lib/utils";
 import { resolveSections, SECTION_ALGO_VERSION } from "@/lib/sectioning";
 import {
   ensureSession,
@@ -36,6 +36,30 @@ import {
 import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
+
+/**
+ * Read `filters.section` as a person filter, or null when it names a section instead.
+ *
+ * The one field carries both kinds of selection: a section key, or "assignee:<memberId>" /
+ * "reviewer:<memberId>". Section keys are not ours to constrain — an explicit label out of the source
+ * file is arbitrary text — so a document with a section literally called "assignee:2" would otherwise
+ * be read as a person filter and never show its own questions. Checking the real keys first means a
+ * section always wins the name it actually has; a person filter only has to avoid colliding with a
+ * section that exists in the file being viewed.
+ */
+function parsePersonFilter(
+  section: string,
+  sectionKeys: Set<string>
+): { roleKind: "assignee" | "reviewer"; memberId: string } | null {
+  if (sectionKeys.has(section)) return null;
+  for (const roleKind of ["assignee", "reviewer"] as const) {
+    const prefix = `${roleKind}:`;
+    if (section.startsWith(prefix)) {
+      return { roleKind, memberId: section.slice(prefix.length) };
+    }
+  }
+  return null;
+}
 
 /**
  * Shallow value equality for the overlay maps.
@@ -243,24 +267,34 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * those names were put against no longer exist — but the alternative is a file that reads as though
    * nobody was ever assigned to anything, which is the wrong thing for someone to conclude.
    *
+   * Two ways a room can be in this state, and the second is the one that actually reaches users:
+   *
+   *  - It was seeded under a different SECTION_ALGO_VERSION, and still holds section-keyed assignment
+   *    that no longer matches any section.
+   *  - It predates the move from per-question to per-section assignment, so it holds the obsolete
+   *    item-keyed nodes this build does not read. Those rooms carry no version stamp at all — it
+   *    postdates them — so the version check alone would let the most common case through silently.
+   *
    * Only worth saying when there is assignment to lose, and only once per room.
    */
   const mismatchWarnedFor = useRef<string | null>(null);
   const reportAlgoMismatch = useCallback(
     (state: SessionState) => {
       const { sectionAlgoVersion: stored } = state;
-      // Undefined means the room predates the stamp, which is not evidence of a mismatch.
-      if (stored === undefined || stored === SECTION_ALGO_VERSION) return;
-      const hasAssignment =
-        Object.keys(state.sectionAssignees).length > 0 ||
-        Object.keys(state.sectionReviewers).length > 0;
-      if (!hasAssignment) return;
+      const staleKeys =
+        // Undefined means the room predates the stamp, which on its own is not evidence of a
+        // mismatch: an unstamped room may well have been seeded by these very rules.
+        stored !== undefined &&
+        stored !== SECTION_ALGO_VERSION &&
+        (Object.keys(state.sectionAssignees).length > 0 ||
+          Object.keys(state.sectionReviewers).length > 0);
+      if (!staleKeys && state.hasLegacyItemAssignment !== true) return;
       const room = docIdRef.current;
       if (mismatchWarnedFor.current === room) return;
       mismatchWarnedFor.current = room;
       showError(
         "Section assignments could not be matched up",
-        "This file was shared using an older version of the app, which divided it into different sections. The assignees and reviewers recorded then do not line up with the sections shown here, so every section starts unassigned. Assign them again to bring this file up to date."
+        "This file was shared using an older version of the app, which recorded assignments against a different breakdown of the questions. The assignees and reviewers saved then do not line up with the sections shown here, so every section starts unassigned. Assign them again to bring this file up to date."
       );
     },
     [showError]
@@ -611,7 +645,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     [data]
   );
 
-  const allSections = useMemo(() => getSections(sectionMap), [sectionMap]);
+  const sectionKeys = useMemo(
+    () => new Set(sectionMap.sections.map((s) => s.key)),
+    [sectionMap]
+  );
 
   // Per-person filter options, computed dynamically from who actually has
   // assignments/reviews in the currently loaded file (not the full team bank).
@@ -657,10 +694,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    */
   const effectiveFilters = useMemo((): Filters => {
     const { section } = filters;
-    if (!section.startsWith("assignee:") && !section.startsWith("reviewer:")) return filters;
+    if (parsePersonFilter(section, sectionKeys) === null) return filters;
     if (personFilterOptions.some((opt) => opt.value === section)) return filters;
     return { ...filters, section: "" };
-  }, [filters, personFilterOptions]);
+  }, [filters, personFilterOptions, sectionKeys]);
 
   const filteredItems = useMemo((): QAItem[] => {
     if (!data) return [];
@@ -668,12 +705,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     const term = search.toLowerCase();
 
     let matchingSections: Set<string> | null = null;
-    if (section.startsWith("assignee:") || section.startsWith("reviewer:")) {
-      const [kind, memberId] = section.split(":", 2);
-      const roleMap = kind === "assignee" ? sectionAssignees : sectionReviewers;
+    const person = parsePersonFilter(section, sectionKeys);
+    if (person) {
+      const roleMap =
+        person.roleKind === "assignee" ? sectionAssignees : sectionReviewers;
       matchingSections = new Set(
         sectionMap.sections
-          .filter((sec) => roleMap[sec.key] === memberId)
+          .filter((sec) => roleMap[sec.key] === person.memberId)
           .map((sec) => sec.key)
       );
     }
@@ -710,6 +748,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     sectionAssignees,
     sectionReviewers,
     sectionMap,
+    sectionKeys,
   ]);
 
   const grouped = useMemo(
@@ -761,7 +800,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                   rather than as an option the dropdown no longer has. */}
               <FilterBar
                 filters={effectiveFilters}
-                sections={allSections}
+                sections={sectionMap.sections}
                 personFilterOptions={personFilterOptions}
                 onChange={setFilters}
                 resultCount={filteredItems.length}

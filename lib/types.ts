@@ -89,6 +89,13 @@ export interface SessionState {
    * sections this build does not produce. Undefined for a session written before the stamp existed.
    */
   sectionAlgoVersion?: number;
+  /**
+   * Whether the session still carries the obsolete item-keyed assignees/reviewers nodes. Set by
+   * subscribeToSession from the raw snapshot; never written back. Rooms from before assignment moved
+   * to sections predate sectionAlgoVersion too, so this is the only signal that their empty
+   * assignment is data this build declines to read rather than work nobody has done.
+   */
+  hasLegacyItemAssignment?: boolean;
 }
 
 export interface TeamMember {

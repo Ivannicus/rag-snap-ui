@@ -36,11 +36,6 @@ export function questionState(
   return approved ? "approved" : "ready";
 }
 
-/** Sections available for the filter dropdown, in resolved order. */
-export function getSections(map: SectionMap): SectionInfo[] {
-  return map.sections;
-}
-
 /** The section key an item belongs to, per the resolved map. */
 export function sectionKeyOf(map: SectionMap, item: QAItem): string {
   return map.byItemId[item.id] ?? "";

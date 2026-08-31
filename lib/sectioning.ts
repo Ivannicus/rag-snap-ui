@@ -32,7 +32,7 @@ import type { QAItem, SectionInfo, SectionMap } from "./types";
  * Bumping does not repair any of that. It records which rules the stored keys were written under, so
  * the mismatch can be noticed and said out loud instead of looking like nobody ever assigned anyone.
  */
-export const SECTION_ALGO_VERSION = 1;
+export const SECTION_ALGO_VERSION = 2;
 
 /**
  * Ceiling on questions per section, applied to every section — real and inferred alike.
@@ -69,16 +69,26 @@ function explicitLabel(item: QAItem): string | undefined {
   return clean || undefined;
 }
 
+/**
+ * Only treat a file as explicitly sectioned when *every* item carries a label.
+ *
+ * One labelled item is not a section scheme. On `.some`, a file where a single question happened to
+ * carry a `section` field sent the whole document down tier 1, and every other question — however
+ * clean its id hierarchy — landed in one giant "Unsectioned" bucket that then split into anonymous
+ * numbered parts. Requiring the label throughout means a partial set falls through to the id
+ * hierarchy or inference, which is what a file that only half-answers the question deserves.
+ */
 function hasExplicitSections(items: QAItem[]): boolean {
-  return items.some((i) => explicitLabel(i) !== undefined);
+  return items.every((i) => explicitLabel(i) !== undefined);
 }
 
 /**
  * Separators an id may use between its section part and its question part, in precedence order.
  *
- * Order only decides ties on bucket count. Period leads because it is the documented format;
- * hyphen next, since "CP-01"/"MP-13" style ids are common in RFP exports. On a tie the earlier
- * delimiter wins, which keeps the fuller prefix ("CSR_Digital_Sobriety" over "CSR").
+ * Order only decides ties on bucket count, and only among delimiters that every id carries. Period
+ * leads because it is the documented format; hyphen next, since "CP-01"/"MP-13" style ids are common
+ * in RFP exports. Note that precedence rarely gets to speak: ids like "CSR_Digital_Sobriety_01" carry
+ * no period at all, so "." is skipped outright and "_" resolves them to prefix "CSR".
  */
 const ID_DELIMITERS = [".", "-", "_", ":", "/", " "] as const;
 
@@ -380,6 +390,22 @@ function isNumericName(name: string): boolean {
 }
 
 /**
+ * Make a base key safe to append "~<part>" to.
+ *
+ * "~" separates a base key from a part number, and base keys are not ours: an explicit label or an id
+ * prefix can contain a tilde of its own. Untouched, a document with sections "A~2" (one question) and
+ * "A" (that splits) hands two different sections the key "A~2" — they merge into one group, the
+ * count on it is wrong, React sees duplicate keys, and one assignment covers both.
+ *
+ * Doubling every "~" fixes it because it makes the escaped base's tilde runs all even-length, while
+ * the separator always contributes an odd one. So no escaped base can end in what looks like a part
+ * suffix, and the mapping is injective — distinct bases stay distinct keys.
+ */
+function escapeKey(base: string): string {
+  return base.replace(/~/g, "~~");
+}
+
+/**
  * Apply the section cap, numbering the parts only when a split actually happened.
  *
  * The trailing number marks split position, so a folded final part still carries the number of the
@@ -393,8 +419,11 @@ function splitIntoParts(
   cap: number,
   decimal: boolean
 ): Segment[] {
+  // Escape whether or not this section splits: an unsplit "A~2" would otherwise collide with part 2
+  // of a split "A".
+  const safeKey = escapeKey(baseKey);
   const sizes = partSizes(items.length, cap);
-  if (sizes.length === 1) return [{ key: baseKey, label: baseName, items }];
+  if (sizes.length === 1) return [{ key: safeKey, label: baseName, items }];
 
   const parts: Segment[] = [];
   let offset = 0;
@@ -403,7 +432,7 @@ function splitIntoParts(
     parts.push({
       // The part number belongs in the key too: assignment is stored per section, and two parts of
       // one original section are two separately assignable sections.
-      key: `${baseKey}~${n}`,
+      key: `${safeKey}~${n}`,
       label: decimal ? `${baseName}.${n}` : `${baseName} ${n}`,
       items: items.slice(offset, offset + size),
     });

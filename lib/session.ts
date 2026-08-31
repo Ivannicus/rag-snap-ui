@@ -40,6 +40,14 @@ function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
   return out;
 }
 
+/** Whether a snapshot node exists and holds at least one entry. RTDB drops empty nodes, but a node
+ * whose entries were all cleared can still arrive as an empty object from a local write. */
+function hasEntries(node: unknown): boolean {
+  return (
+    typeof node === 'object' && node !== null && Object.keys(node).length > 0
+  );
+}
+
 /**
  * Create the session node for a doc if it does not exist yet.
  *
@@ -109,6 +117,12 @@ export function subscribeToSession(
         // unassigned.
         sectionAssignees: decodeKeys(val.sectionAssignees ?? {}),
         sectionReviewers: decodeKeys(val.sectionReviewers ?? {}),
+        // The obsolete nodes are still worth noticing. Their presence is the only evidence that a
+        // room's blank assignment is stale data rather than work nobody has started, and such a room
+        // carries no sectionAlgoVersion either (the stamp postdates the move), so the version check
+        // alone cannot see it.
+        hasLegacyItemAssignment:
+          hasEntries(val.assignees) || hasEntries(val.reviewers),
         // Left undefined when the node predates the stamp, which is not the same as a known
         // mismatch: an unstamped room may well have been seeded by these very rules.
         sectionAlgoVersion:
