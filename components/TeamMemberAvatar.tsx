@@ -8,6 +8,9 @@ interface Props {
 export default function TeamMemberAvatar({ member, size }: Props) {
   const sizeClass = size ? `team-member-avatar--${size}` : "";
   return member.photoURL ? (
+    // A plain <img>, not next/image: this app builds with `output: 'export'`, which has no image
+    // optimizer to route through, and the src is a Google profile URL rather than a bundled asset.
+    // eslint-disable-next-line @next/next/no-img-element -- remote avatar, static export
     <img
       src={member.photoURL}
       alt=""

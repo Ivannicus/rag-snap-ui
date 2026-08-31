@@ -83,6 +83,12 @@ export interface SessionState {
   // reviewers nodes are obsolete and deliberately not read.
   sectionAssignees: Record<string, string>; // SectionInfo.key -> TeamMember.id
   sectionReviewers: Record<string, string>; // SectionInfo.key -> TeamMember.id
+  /**
+   * Which version of lib/sectioning.ts minted the keys the two maps above are stored against. Those
+   * keys are algorithm output, so a session seeded under different rules keys its assignment to
+   * sections this build does not produce. Undefined for a session written before the stamp existed.
+   */
+  sectionAlgoVersion?: number;
 }
 
 export interface TeamMember {

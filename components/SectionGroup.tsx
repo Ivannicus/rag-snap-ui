@@ -7,6 +7,8 @@ import type { QAItem, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
   section: SectionInfo;
+  /** Position in the rendered list. Only used to mint a unique DOM id for this section's panel. */
+  index: number;
   items: QAItem[];
   searchTerm?: string;
   editedAnswers: Record<string, string>;
@@ -42,6 +44,7 @@ interface Props {
 
 export default function SectionGroup({
   section,
+  index,
   items,
   searchTerm = "",
   editedAnswers,
@@ -75,9 +78,11 @@ export default function SectionGroup({
   }
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
-  // Section keys can carry spaces and punctuation (explicit labels are used verbatim), so they are
-  // squeezed into something usable as an id for aria-controls.
-  const panelId = `section-cards-${section.key.replace(/[^\w-]+/g, "-")}`;
+  // Keyed on list position, not on section.key. Keys are used verbatim from explicit labels, so they
+  // carry spaces and punctuation an id cannot; squeezing those out collides — "A/B" and "A B" both
+  // reduce to "A-B", as do the split part "3~2" and a hyphen-delimited section "3-2" — and a
+  // duplicate id points aria-controls at whichever panel the document happens to reach first.
+  const panelId = `section-cards-${index}`;
 
   return (
     <div>

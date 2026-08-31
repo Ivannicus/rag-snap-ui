@@ -16,7 +16,32 @@
 
 import type { QAItem, SectionInfo, SectionMap } from "./types";
 
-/** Ceiling on questions per section, applied to every section — real and inferred alike. */
+/**
+ * Identity of the resolution rules below. **Bump this whenever a change here can move a question
+ * into a differently-keyed section** — every constant in this block counts, as does the shape of a
+ * `SectionInfo.key`.
+ *
+ * Section keys are the primary key for assignment: `sectionAssignees`/`sectionReviewers` are stored
+ * against them, and for inferred sections and split parts those keys ("inferred:2", "3~2") are
+ * outputs of this file rather than anything the source document said. So a change here silently
+ * orphans stored assignment — the entries stay in the room, match no section, and every section
+ * reads "Unassigned" with nothing to say why. Worse in the interim: two tabs on either side of a
+ * deploy sit in the same room disagreeing about what a section is, and one person's assignment lands
+ * where the other cannot see it.
+ *
+ * Bumping does not repair any of that. It records which rules the stored keys were written under, so
+ * the mismatch can be noticed and said out loud instead of looking like nobody ever assigned anyone.
+ */
+export const SECTION_ALGO_VERSION = 1;
+
+/**
+ * Ceiling on questions per section, applied to every section — real and inferred alike.
+ *
+ * Soft: a trailing part below MIN_FINAL_PART folds back into the one before it, so sections of
+ * cap+1 to cap+MIN_FINAL_PART-1 questions exist by design (34 -> 10/10/14). See `partSizes`.
+ *
+ * Changing this re-keys every split section. Bump SECTION_ALGO_VERSION with it.
+ */
 export const SECTION_CAP = 10;
 
 /** A final part below this size folds into the part before it rather than standing alone. */
@@ -28,7 +53,10 @@ const BLOCK_RADIUS = 2;
 /** Depth cutoff for a boundary, in standard deviations above the mean gap depth. */
 const DEPTH_CUTOFF_SD = 0.2;
 
-/** Smallest inferred segment; stops one stray question becoming its own section. */
+/**
+ * Smallest inferred segment, counted from the ends of the file as well as between boundaries; stops
+ * one stray question becoming its own section.
+ */
 const MIN_SEGMENT_SIZE = 2;
 
 // ---------------------------------------------------------------------------- tier 1
@@ -59,22 +87,27 @@ function prefixOf(id: string, delimiter: string): string {
 }
 
 /**
- * Pick the delimiter whose prefixes collapse the items into the fewest buckets, or null when no
- * delimiter collapses them at all.
+ * Pick the delimiter that every id carries and whose prefixes collapse the items into the fewest
+ * buckets, or null when no delimiter runs through the whole file.
  *
- * A delimiter that does not appear in the ids is self-eliminating: split returns each id whole, so
- * the bucket count equals the item count and the collapse guard rejects it. That is what keeps a
- * genuinely flat file ("1".."56") falling through to inference no matter how many delimiters we
- * try — widening this list can only ever rescue ids that really do carry a separator.
+ * The test is presence in *every* id, not a drop in bucket count. A hierarchy half the file does not
+ * follow is not a hierarchy, and counting buckets instead let a single stray separator pass: a flat
+ * file ("1".."56") with one duplicated id comes out of parseQAFile carrying "7.1"/"7.2", and those
+ * two ids collapsing into one bucket was enough to make "." look like a delimiter and hand every
+ * question its own section — the exact failure this module was written to remove. Requiring the
+ * delimiter throughout keeps a genuinely flat file falling through to inference however many
+ * delimiters we try, so widening the list can only rescue ids that really do carry a separator.
  *
- * One bucket counts as signal, not noise: rag-cli's per-section exports give every item the same
- * id, and those files are legitimately a single section.
+ * No collapse at all is still signal once the delimiter is everywhere: ids "1.1", "2.1", "3.1" are
+ * three single-question sections, and saying so beats inferring topics over a file that already told
+ * us its structure. One bucket is signal too — rag-cli's per-section exports give every item the
+ * same id, and those files are legitimately a single section.
  */
 function chooseIdDelimiter(items: QAItem[]): string | null {
   let best: { delimiter: string; size: number } | null = null;
   for (const delimiter of ID_DELIMITERS) {
+    if (!items.every((i) => i.id.includes(delimiter))) continue;
     const size = new Set(items.map((i) => prefixOf(i.id, delimiter))).size;
-    if (size >= items.length) continue; // no collapse — no grouping signal
     // Strictly-less keeps the earlier, higher-precedence delimiter when counts tie.
     if (best === null || size < best.size) best = { delimiter, size };
   }
@@ -224,6 +257,9 @@ function scoreGaps(vectors: Vector[]): GapScore[] {
 function chooseBoundaries(scored: GapScore[]): number[] {
   if (scored.length === 0) return [];
 
+  // One gap sits between each adjacent pair, so the file is one question longer than the gap list.
+  const itemCount = scored.length + 1;
+
   const depths = scored.map((s) => s.depth);
   const mean = depths.reduce((a, b) => a + b, 0) / depths.length;
   const sd = Math.sqrt(
@@ -234,6 +270,10 @@ function chooseBoundaries(scored: GapScore[]): number[] {
   const accepted: number[] = [];
   const candidates = scored
     .filter((s) => s.depth > threshold)
+    // The ends count as boundaries for spacing purposes. Measuring only against accepted boundaries
+    // left the first and last gaps unguarded, so a lone topical outlier at either end of the file
+    // still became a one-question section — the very thing MIN_SEGMENT_SIZE exists to prevent.
+    .filter((s) => s.gap >= MIN_SEGMENT_SIZE && itemCount - s.gap >= MIN_SEGMENT_SIZE)
     // Deepest first, so when two boundaries compete for the same neighbourhood the stronger
     // topic shift wins. Ties break on gap index to stay deterministic.
     .sort((a, b) => b.depth - a.depth || a.gap - b.gap);

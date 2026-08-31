@@ -1,5 +1,6 @@
 import { ref, update, remove, onValue, get, runTransaction } from 'firebase/database';
 import { db } from './firebase';
+import { SECTION_ALGO_VERSION } from './sectioning';
 import type { SessionState } from './types';
 
 // Firebase RTDB forbids ".", "$", "#", "[", "]" and "/" in keys. Item IDs like "1.1" and section
@@ -73,6 +74,10 @@ export async function ensureSession(sessionId: string, state: SessionState): Pro
       approvals: encodeKeys(state.approvals),
       sectionAssignees: encodeKeys(state.sectionAssignees),
       sectionReviewers: encodeKeys(state.sectionReviewers),
+      // Stamped once, at seed. The room keeps the rules its section keys were minted under, so a
+      // later build resolving the same doc differently can notice rather than quietly show every
+      // section as unassigned.
+      sectionAlgoVersion: SECTION_ALGO_VERSION,
       createdAt,
     };
   });
@@ -104,6 +109,10 @@ export function subscribeToSession(
         // unassigned.
         sectionAssignees: decodeKeys(val.sectionAssignees ?? {}),
         sectionReviewers: decodeKeys(val.sectionReviewers ?? {}),
+        // Left undefined when the node predates the stamp, which is not the same as a known
+        // mismatch: an unstamped room may well have been seeded by these very rules.
+        sectionAlgoVersion:
+          typeof val.sectionAlgoVersion === 'number' ? val.sectionAlgoVersion : undefined,
       });
     }
   });

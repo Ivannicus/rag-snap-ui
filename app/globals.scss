@@ -560,11 +560,18 @@
   overflow: hidden;
   max-height: 4000px;
   opacity: 1;
-  transition: max-height 0.2s ease, opacity 0.2s ease;
+  // `visibility` is transitioned with a zero duration so it can be *delayed* below. On the way open
+  // it flips at 0s and the height and fade do the work.
+  transition: max-height 0.2s ease, opacity 0.2s ease, visibility 0s linear 0s;
 
   &.is-collapsed {
     max-height: 0;
     opacity: 0;
+    // Not just clipped: a card collapsed to zero height still had its controls in the tab order and
+    // in the accessibility tree, so Approve could be reached — and pressed — on an answer nobody
+    // could see. Delayed by the length of the collapse so the animation still plays out.
+    visibility: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease, visibility 0s linear 0.2s;
   }
 }
 

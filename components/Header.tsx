@@ -95,6 +95,8 @@ export default function Header({
                       <li key={m.id} className="p-list__item filter-bar__member">
                         <span className="filter-bar__member-info">
                           {m.photoURL ? (
+                            // Remote avatar, static export — see TeamMemberAvatar.
+                            // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={m.photoURL}
                               alt=""
@@ -191,6 +193,8 @@ export default function Header({
             </header>
             <div className="remove-member-modal__body">
               {memberToRemove.photoURL ? (
+                // Remote avatar, static export — see TeamMemberAvatar.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={memberToRemove.photoURL}
                   alt=""
