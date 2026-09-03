@@ -1,13 +1,20 @@
 import { ref, update, remove, onValue, get, runTransaction } from 'firebase/database';
 import { db } from './firebase';
-import type { SessionState } from './types';
+import type { ItemStatus, ParsedQAFile, SessionState } from './types';
 
-// Firebase RTDB forbids "." in keys. Encode/decode so item IDs like "1.1" survive round-trips.
-function encodeKey(key: string): string {
+/**
+ * Firebase RTDB forbids "." in keys. Encode/decode so item IDs like "1.1" survive round-trips.
+ *
+ * Exported because section keys are derived from item ids (`sectionOf` splits on ".") and so carry
+ * the same restriction, and because the dashboard reads these maps through its own module. One
+ * codec for every key under a session node — a second, parallel implementation is how the two halves
+ * of a map end up disagreeing about what a key is called.
+ */
+export function encodeKey(key: string): string {
   return key.replace(/\./g, '%2E');
 }
 
-function decodeKey(key: string): string {
+export function decodeKey(key: string): string {
   return key.replace(/%2E/g, '.');
 }
 
@@ -17,10 +24,31 @@ function encodeKeys<T>(map: Record<string, T>): Record<string, T> {
   return out;
 }
 
-function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
+export function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [k, v] of Object.entries(map)) out[decodeKey(k)] = v;
   return out;
+}
+
+/**
+ * A session for a document nobody has touched yet: the results plus empty overlay maps.
+ *
+ * One place to build this, so that adding an overlay map cannot leave a caller seeding a session that
+ * is missing it. Both callers — opening a document, and receiving a handed-off batch — used to spell
+ * the literal out themselves.
+ */
+export function newSessionState(data: ParsedQAFile, filename: string): SessionState {
+  return {
+    data,
+    filename,
+    editedAnswers: {},
+    ratings: {},
+    contextUrls: {},
+    itemStatus: {},
+    projectAssignees: {},
+    sectionAssignees: {},
+    sectionReviewers: {},
+  };
 }
 
 /**
@@ -54,8 +82,12 @@ export async function ensureSession(sessionId: string, state: SessionState): Pro
       editedAnswers: encodeKeys(state.editedAnswers),
       ratings: encodeKeys(state.ratings),
       contextUrls: encodeKeys(state.contextUrls),
-      assignees: encodeKeys(state.assignees),
-      reviewers: encodeKeys(state.reviewers),
+      itemStatus: encodeKeys(state.itemStatus),
+      sectionAssignees: encodeKeys(state.sectionAssignees),
+      sectionReviewers: encodeKeys(state.sectionReviewers),
+      // Keyed by TeamMember.id, which is a sanitized email and already free of forbidden characters,
+      // so this map is the one that is stored as-is.
+      projectAssignees: state.projectAssignees,
       createdAt,
     };
   });
@@ -78,8 +110,13 @@ export function subscribeToSession(
         editedAnswers: decodeKeys(val.editedAnswers ?? {}),
         ratings: decodeKeys(val.ratings ?? {}),
         contextUrls: decodeKeys(val.contextUrls ?? {}),
-        assignees: decodeKeys(val.assignees ?? {}),
-        reviewers: decodeKeys(val.reviewers ?? {}),
+        // Every session node written before these fields existed lacks them, so each defaults to an
+        // empty map rather than being trusted to be present. Nodes written *before* per-item
+        // assignment was removed still carry `assignees`/`reviewers`; they are simply not read.
+        itemStatus: decodeKeys(val.itemStatus ?? {}),
+        sectionAssignees: decodeKeys(val.sectionAssignees ?? {}),
+        sectionReviewers: decodeKeys(val.sectionReviewers ?? {}),
+        projectAssignees: val.projectAssignees ?? {},
       });
     }
   });
@@ -101,33 +138,71 @@ export function clearRating(sessionId: string, itemId: string) {
   return remove(ref(db, `sessions/${sessionId}/ratings/${encodeKey(itemId)}`));
 }
 
-export function updateContextUrl(sessionId: string, itemId: string, url: string) {
-  return update(ref(db, `sessions/${sessionId}/contextUrls`), { [encodeKey(itemId)]: url });
+export function updateItemStatus(sessionId: string, itemId: string, status: ItemStatus) {
+  return update(ref(db, `sessions/${sessionId}/itemStatus`), { [encodeKey(itemId)]: status });
 }
 
-export function clearContextUrl(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/contextUrls/${encodeKey(itemId)}`));
+/** Withdraw a sign-off. The item falls back to ready, or to unanswered if the AI left it blank. */
+export function clearItemStatus(sessionId: string, itemId: string) {
+  return remove(ref(db, `sessions/${sessionId}/itemStatus/${encodeKey(itemId)}`));
 }
 
-export function updateAssignee(sessionId: string, itemId: string, memberId: string) {
-  return update(ref(db, `sessions/${sessionId}/assignees`), { [encodeKey(itemId)]: memberId });
+export function updateSectionAssignee(sessionId: string, sectionKey: string, memberId: string) {
+  return update(ref(db, `sessions/${sessionId}/sectionAssignees`), {
+    [encodeKey(sectionKey)]: memberId,
+  });
 }
 
-export function clearAssignee(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/assignees/${encodeKey(itemId)}`));
+export function clearSectionAssignee(sessionId: string, sectionKey: string) {
+  return remove(ref(db, `sessions/${sessionId}/sectionAssignees/${encodeKey(sectionKey)}`));
 }
 
-export function updateReviewer(sessionId: string, itemId: string, memberId: string) {
-  return update(ref(db, `sessions/${sessionId}/reviewers`), { [encodeKey(itemId)]: memberId });
+export function updateSectionReviewer(sessionId: string, sectionKey: string, memberId: string) {
+  return update(ref(db, `sessions/${sessionId}/sectionReviewers`), {
+    [encodeKey(sectionKey)]: memberId,
+  });
 }
 
-export function clearReviewer(sessionId: string, itemId: string) {
-  return remove(ref(db, `sessions/${sessionId}/reviewers/${encodeKey(itemId)}`));
+export function clearSectionReviewer(sessionId: string, sectionKey: string) {
+  return remove(ref(db, `sessions/${sessionId}/sectionReviewers/${encodeKey(sectionKey)}`));
 }
 
 /**
- * When a team member is deleted from the bank, revert any assignee/reviewer
- * references to that member back to unassigned across all active sessions.
+ * Replace a project's owners with exactly `memberIds`.
+ *
+ * Written as one `update` of member-id keys rather than a `set` of the whole map, so that two leads
+ * editing different owners at the same moment do not overwrite each other: every key either present
+ * or explicitly `null` means the write says something definite about each owner it changes, and
+ * nothing at all about any key added between the read and the write.
+ */
+export function setProjectAssignees(
+  sessionId: string,
+  memberIds: string[],
+  previousMemberIds: string[]
+) {
+  const patch: Record<string, true | null> = {};
+  for (const id of previousMemberIds) patch[id] = null;
+  for (const id of memberIds) patch[id] = true;
+  return update(ref(db, `sessions/${sessionId}/projectAssignees`), patch);
+}
+
+/**
+ * When a team member is deleted from the bank, revert every reference to that member back to
+ * unassigned across all active sessions.
+ *
+ * Covers all three places a `TeamMember.id` can appear: the per-section `sectionAssignees` and
+ * `sectionReviewers`, and `projectAssignees` — which is the one keyed *by* member id rather than
+ * holding it as a value, so it is matched on the key instead.
+ *
+ * Sessions opened before per-item assignment was removed can still hold `assignees`/`reviewers`
+ * nodes naming this member. They are left alone: nothing reads them any more, so a stale id in
+ * there is invisible rather than a ghost assignment.
+ *
+ * `itemStatus` is deliberately not touched. It holds only the literal "approved" and never a member
+ * id, so there is no ghost reference in it to clear, and clearing it anyway would silently withdraw
+ * sign-offs across every project because one person left the team. Revoking a departed member's
+ * approvals is a defensible rule, but it needs the approver recorded alongside the status before it
+ * can be done to the right items rather than to all of them.
  */
 export async function revertAssignmentsForMember(memberId: string): Promise<void> {
   const snapshot = await get(ref(db, 'sessions'));
@@ -136,15 +211,18 @@ export async function revertAssignmentsForMember(memberId: string): Promise<void
 
   const updates: Record<string, null> = {};
   for (const [sessionId, session] of Object.entries(sessions as Record<string, any>)) {
-    for (const [itemId, assigneeId] of Object.entries(session.assignees ?? {})) {
+    for (const [sectionKey, assigneeId] of Object.entries(session.sectionAssignees ?? {})) {
       if (assigneeId === memberId) {
-        updates[`sessions/${sessionId}/assignees/${itemId}`] = null;
+        updates[`sessions/${sessionId}/sectionAssignees/${sectionKey}`] = null;
       }
     }
-    for (const [itemId, reviewerId] of Object.entries(session.reviewers ?? {})) {
+    for (const [sectionKey, reviewerId] of Object.entries(session.sectionReviewers ?? {})) {
       if (reviewerId === memberId) {
-        updates[`sessions/${sessionId}/reviewers/${itemId}`] = null;
+        updates[`sessions/${sessionId}/sectionReviewers/${sectionKey}`] = null;
       }
+    }
+    if (session.projectAssignees?.[memberId]) {
+      updates[`sessions/${sessionId}/projectAssignees/${memberId}`] = null;
     }
   }
 

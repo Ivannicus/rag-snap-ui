@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
-import TeamMemberSelect from "./TeamMemberSelect";
+import React, { useEffect, useState } from "react";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem, TeamMember } from "@/lib/types";
+import type { QAItem } from "@/lib/types";
 
 interface Props {
   item: QAItem;
@@ -14,16 +13,20 @@ interface Props {
   rating?: number;
   onSaveRating: (id: string, rating: number) => void;
   onClearRating: (id: string) => void;
+  /**
+   * A previously attached context URL, shown as a badge only. There is no longer any control for
+   * setting or clearing one — see the note where the input used to be.
+   */
   contextUrl?: string;
-  onSaveContextUrl: (id: string, url: string) => void;
-  onClearContextUrl: (id: string) => void;
-  assignee?: string;
-  onSaveAssignee: (id: string, memberId: string) => void;
-  onClearAssignee: (id: string) => void;
-  reviewer?: string;
-  onSaveReviewer: (id: string, memberId: string) => void;
-  onClearReviewer: (id: string) => void;
-  teamMembers: TeamMember[];
+  /** True when `itemStatus[item.id] === "approved"`. */
+  approved: boolean;
+  /**
+   * Why this user may not approve, or undefined when they may. Set by `SectionGroup` from the
+   * section's reviewer; shown in place of the usual hint beside the button.
+   */
+  approveDisabledReason?: string;
+  onApprove: (id: string) => void;
+  onUnapprove: (id: string) => void;
 }
 
 /** Highlight search term occurrences in text */
@@ -126,137 +129,6 @@ function StarRating({
   );
 }
 
-function ContextUrlRow({
-  url,
-  onSave,
-  onClear,
-}: {
-  url: string | undefined;
-  onSave: (url: string) => void;
-  onClear: () => void;
-}) {
-  const [draft, setDraft] = useState(url ?? "");
-  const [editing, setEditing] = useState(!url);
-
-  function handleSave() {
-    const trimmed = draft.trim();
-    if (trimmed) {
-      onSave(trimmed);
-      setEditing(false);
-    }
-  }
-
-  function handleClear() {
-    onClear();
-    setDraft("");
-    setEditing(true);
-  }
-
-  if (!editing && url) {
-    return (
-      <div className="context-url-row">
-        <i className="p-icon--external-link"></i>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="u-truncate context-url-row__link"
-        >
-          {url}
-        </a>
-        <button
-          onClick={(e) => { e.stopPropagation(); setDraft(url); setEditing(true); }}
-          title="Edit URL"
-          className="p-button--base is-dense u-no-margin--bottom"
-        >
-          <i className="p-icon--edit">
-            <span className="u-off-screen">Edit URL</span>
-          </i>
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); handleClear(); }}
-          title="Remove URL"
-          className="p-button--base is-dense u-no-margin--bottom"
-        >
-          <i className="p-icon--delete">
-            <span className="u-off-screen">Remove URL</span>
-          </i>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="context-url-row">
-      <input
-        type="url"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); handleSave(); }
-          if (e.key === "Escape") { e.preventDefault(); if (url) { setDraft(url); setEditing(false); } }
-        }}
-        onClick={(e) => e.stopPropagation()}
-        placeholder="https://docs.example.com/..."
-        className="u-no-margin--bottom context-url-row__input"
-      />
-      <button
-        onClick={(e) => { e.stopPropagation(); handleSave(); }}
-        disabled={!draft.trim()}
-        className="p-button--positive is-dense u-no-margin--bottom"
-      >
-        Save
-      </button>
-      {url && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setDraft(url); setEditing(false); }}
-          className="p-button--base is-dense u-no-margin--bottom"
-        >
-          Cancel
-        </button>
-      )}
-    </div>
-  );
-}
-
-function AssignmentRow({
-  assignee,
-  reviewer,
-  teamMembers,
-  onSaveAssignee,
-  onClearAssignee,
-  onSaveReviewer,
-  onClearReviewer,
-}: {
-  assignee?: string;
-  reviewer?: string;
-  teamMembers: TeamMember[];
-  onSaveAssignee: (memberId: string) => void;
-  onClearAssignee: () => void;
-  onSaveReviewer: (memberId: string) => void;
-  onClearReviewer: () => void;
-}) {
-  return (
-    <div className="assignment-row">
-      <TeamMemberSelect
-        label="Assignee:"
-        value={assignee}
-        teamMembers={teamMembers}
-        onSelect={onSaveAssignee}
-        onClear={onClearAssignee}
-      />
-      <TeamMemberSelect
-        label="Reviewer:"
-        value={reviewer}
-        teamMembers={teamMembers}
-        onSelect={onSaveReviewer}
-        onClear={onClearReviewer}
-      />
-    </div>
-  );
-}
-
 export default function QuestionCard({
   item,
   searchTerm = "",
@@ -267,25 +139,36 @@ export default function QuestionCard({
   onSaveRating,
   onClearRating,
   contextUrl,
-  onSaveContextUrl,
-  onClearContextUrl,
-  assignee,
-  onSaveAssignee,
-  onClearAssignee,
-  reviewer,
-  onSaveReviewer,
-  onClearReviewer,
-  teamMembers,
+  approved,
+  approveDisabledReason,
+  onApprove,
+  onUnapprove,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [confirmingRevert, setConfirmingRevert] = useState(false);
+  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
 
   const unanswered = isUnanswered(item.answer);
   const hasEdit = editedAnswer !== undefined;
 
+  /**
+   * An approved answer is frozen: sign-off is on the exact text that was signed off on, so editing it
+   * afterwards would leave an approval standing over words the reviewer never read. Withdraw first.
+   *
+   * Approval arrives over the live session too, so the editor has to close on someone *else's*
+   * approval and not just refuse to open — see the effect below.
+   */
+  useEffect(() => {
+    if (approved) {
+      setEditing(false);
+      setConfirmingRevert(false);
+    }
+  }, [approved]);
+
   function startEdit() {
+    if (approved) return;
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
     setOpen(true);
@@ -303,6 +186,7 @@ export default function QuestionCard({
   }
 
   function requestRevert() {
+    if (approved) return;
     setConfirmingRevert(true);
   }
 
@@ -316,11 +200,17 @@ export default function QuestionCard({
     <>
     <div
       className={`p-card question-card ${
-        unanswered && !hasEdit
+        // Same precedence the status derivation uses, so a card's colour and the band it counts
+        // towards on the dashboard can never disagree. `ready` is last because it is the fallback —
+        // anything neither approved nor still blank is awaiting review — and it used to be styled as
+        // nothing at all, which left the most common state as the only one with no colour.
+        approved
+          ? "question-card--approved"
+          : unanswered && !hasEdit
           ? "question-card--unanswered"
           : hasEdit
           ? "question-card--edited"
-          : ""
+          : "question-card--ready"
       }`}
     >
       {/* Question row — clickable to expand */}
@@ -341,6 +231,14 @@ export default function QuestionCard({
         <span className="question-card__question">
           {highlight(item.question, searchTerm)}
         </span>
+
+        {/* Approved badge. First of the status badges, since sign-off is the state that overrides the
+            others: an approved question is done regardless of whether it was edited on the way. */}
+        {approved && (
+          <span className="section-header__block section-header__block--band-approved">
+            <i className="p-icon--success" aria-hidden></i> Approved
+          </span>
+        )}
 
         {/* Edited badge */}
         {hasEdit && (
@@ -366,8 +264,8 @@ export default function QuestionCard({
           </span>
         )}
 
-        {/* Unanswered badge — only if no edit has been applied */}
-        {unanswered && !hasEdit && (
+        {/* Unanswered badge — only if no edit has been applied, and never once approved */}
+        {!approved && unanswered && !hasEdit && (
           <span className="section-header__block section-header__block--negative">
             Unanswered
           </span>
@@ -410,23 +308,29 @@ export default function QuestionCard({
               <p className="p-text--small-caps">Edited</p>
               <div className="question-card__answer question-card__answer--edited">
                 {renderAnswer(editedAnswer!, searchTerm)}
+                {/* Copy survives approval; the two writers do not — an approved answer is frozen
+                    until the approval is withdrawn. */}
                 <div className="question-card__answer-actions">
                   <CopyButton text={editedAnswer!} />
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startEdit(); }}
-                    className="p-button--base is-dense u-no-margin--bottom"
-                  >
-                    <i className="p-icon--edit"></i> Edit again
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); requestRevert(); }}
-                    title="Revert to original"
-                    className="p-button--base is-dense u-no-margin--bottom"
-                  >
-                    <i className="p-icon--close">
-                      <span className="u-off-screen">Revert to original</span>
-                    </i>
-                  </button>
+                  {!approved && (
+                    <>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startEdit(); }}
+                        className="p-button--base is-dense u-no-margin--bottom"
+                      >
+                        <i className="p-icon--edit"></i> Edit again
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); requestRevert(); }}
+                        title="Revert to original"
+                        className="p-button--base is-dense u-no-margin--bottom"
+                      >
+                        <i className="p-icon--close">
+                          <span className="u-off-screen">Revert to original</span>
+                        </i>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -468,6 +372,13 @@ export default function QuestionCard({
                 )}
               </div>
             </div>
+          ) : approved ? (
+            /* Frozen, and said so in place of the Edit control rather than left as a gap — a missing
+               button reads as a bug, and the way back is the Withdraw approval button just below. */
+            <p className="u-text--muted p-text--small u-no-margin--bottom">
+              <i className="p-icon--lock-locked" aria-hidden></i> Approved answers can&rsquo;t be
+              edited. Withdraw the approval below to change this one.
+            </p>
           ) : (
             !hasEdit && (
               <button
@@ -479,31 +390,59 @@ export default function QuestionCard({
             )
           )}
 
-          {/* ── Assignment ── */}
-          <div className="question-card__section">
-            <p className="p-text--small-caps">Assignment</p>
-            <AssignmentRow
-              assignee={assignee}
-              reviewer={reviewer}
-              teamMembers={teamMembers}
-              onSaveAssignee={(memberId) => onSaveAssignee(item.id, memberId)}
-              onClearAssignee={() => onClearAssignee(item.id)}
-              onSaveReviewer={(memberId) => onSaveReviewer(item.id, memberId)}
-              onClearReviewer={() => onClearReviewer(item.id)}
-            />
+          {/* ── Approval ──
+              The only writer of `itemStatus`, and so the only way a question reaches the approved band
+              on the dashboard. Deliberately separate from the star rating: a rating says how good the
+              answer is, approval says it is finished, and one is not the other.
+
+              Approving belongs to the section's reviewer, so the button is disabled for everyone else
+              — `approveDisabledReason` says why, and it is the hint text as well as the tooltip,
+              because a button that is merely greyed out reads as broken rather than as not-yours.
+              Withdrawing is *not* gated: anyone signed in can reopen a question for discussion, which
+              keeps a stale approval from waiting on whoever happens to hold the reviewer field. It is
+              confirmed instead, since it is open to everyone and undoes someone else's sign-off. */}
+          <div className="question-card__section question-card__approval">
+            {approved ? (
+              <>
+                <span className="section-header__block section-header__block--band-approved">
+                  <i className="p-icon--success" aria-hidden></i> Approved
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmingWithdraw(true); }}
+                  className="p-button--base is-dense u-no-margin--bottom"
+                >
+                  Withdraw approval
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onApprove(item.id); }}
+                  disabled={approveDisabledReason !== undefined}
+                  title={approveDisabledReason}
+                  className="p-button--positive is-dense u-no-margin--bottom"
+                >
+                  <i className="p-icon--success is-light" aria-hidden></i> Approve
+                </button>
+                <span className="u-text--muted p-text--small u-no-margin--bottom">
+                  {approveDisabledReason ??
+                    (unanswered && !hasEdit
+                      ? "Still unanswered — approve only if no answer is needed."
+                      : "Ready for review.")}
+                </span>
+              </>
+            )}
           </div>
 
-          {/* ── Context URL — only for originally unanswered questions ── */}
-          {unanswered && (
-            <div className="question-card__section">
-              <p className="p-text--small-caps">Context source URL</p>
-              <ContextUrlRow
-                url={contextUrl}
-                onSave={(url) => onSaveContextUrl(item.id, url)}
-                onClear={() => onClearContextUrl(item.id)}
-              />
-            </div>
-          )}
+          {/* No per-question assignment. Work is handed out a section at a time, in the section
+              header — see `sectionAssignees` / `sectionReviewers`. This card used to carry its own
+              Assignee and Reviewer selects, which made the same question answerable to two different
+              owners depending on which control you looked at. */}
+
+          {/* No context-source-URL input. Unanswered questions used to carry one here, beside the
+              rating, for pointing at the document that would answer them. URLs attached before it was
+              removed are still stored and still exported; the badge in the header row above is all
+              that reads them now. */}
 
           {/* ── Rating ── */}
           <div className="question-card__section">
@@ -531,15 +470,52 @@ export default function QuestionCard({
       </div>
     </div>
 
+    {/* Withdrawing is open to anyone signed in, which is exactly why it asks first: the click undoes
+        a sign-off that may not be yours, and only the section's reviewer can put it back. */}
+    {confirmingWithdraw && (
+      <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="withdraw-approval-title">
+        <div className="p-modal__dialog">
+          <header className="p-modal__header">
+            <h2 className="p-modal__title" id="withdraw-approval-title">Withdraw approval?</h2>
+          </header>
+          {/* The `{" "}` is load-bearing: the compiler strips the leading space from a text node that
+              starts on a new line, so without it this reads "Question 6will go back". */}
+          <p>
+            Question {item.id}{" "}
+            will go back to needing review, and can be edited again. If it should count as finished,
+            the section&rsquo;s reviewer will need to approve it again.
+          </p>
+          <footer className="p-modal__footer">
+            <button
+              className="p-button--base u-no-margin--bottom"
+              onClick={() => setConfirmingWithdraw(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="p-button--negative u-no-margin--bottom"
+              onClick={() => {
+                onUnapprove(item.id);
+                setConfirmingWithdraw(false);
+              }}
+            >
+              Withdraw approval
+            </button>
+          </footer>
+        </div>
+      </div>
+    )}
+
     {confirmingRevert && (
       <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="revert-edit-title">
         <div className="p-modal__dialog">
           <header className="p-modal__header">
             <h2 className="p-modal__title" id="revert-edit-title">Revert to original answer?</h2>
           </header>
+          {/* `{" "}` for the same reason as the withdraw dialog above. */}
           <p>
-            This will discard your edited answer for question {item.id} and restore the original.
-            This can&rsquo;t be undone.
+            This will discard your edited answer for question {item.id}{" "}
+            and restore the original. This can&rsquo;t be undone.
           </p>
           <footer className="p-modal__footer">
             <button

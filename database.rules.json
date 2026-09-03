@@ -17,6 +17,10 @@
     "rfpDatabase": {
       ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
       ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
+    },
+    "archivedProjects": {
+      ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
+      ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
     }
   }
 }

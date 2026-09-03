@@ -6,96 +6,317 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev      # Start dev server at http://localhost:3000
-npm run build    # Production build
-npm run lint     # ESLint via next lint
+npm run build    # Production build (also runs the TypeScript check)
+npx tsc --noEmit # Type check on its own
 ```
 
-There are no tests in this project.
+`npm run lint` is currently broken and not worth chasing before you have a reason to: Next 16 removed
+`next lint`, and the repo still carries an `.eslintrc.json` that ESLint 9 will not read without a flat
+config. Use `npm run build` as the gate — it type checks and compiles the SCSS.
+
+There are no tests in this project. Verify by hand with `npm run dev`.
 
 ## What this app does
 
-RAG Snap UI is a Next.js app for inspecting and editing RAG (Retrieval-Augmented Generation) Q&A result files. Users sign in with Google (@canonical.com accounts only), load a JSON file, browse questions grouped by section, filter/search results, inline-edit answers, rate answers (1–5 stars), attach context source URLs to unanswered questions, share a live-synced session with collaborators, and export results as CSV.
+RAG Snap UI is a Next.js app for managing and reviewing RAG (Retrieval-Augmented Generation) Q&A
+result files, which the app calls **projects**. Users sign in with Google (@canonical.com accounts
+only). A lead uses the **Overview** dashboard to see every project in flight, assign owners, set due
+dates and watch live progress; reviewers open a project in the **Collaborative UI** to browse questions
+by section, filter/search, inline-edit answers, rate them, approve them, and export the results as CSV.
+All work syncs live between everyone with the project open.
 
 ## Architecture
 
 ### Entry point
 
-`app/page.tsx` is minimal — it renders `<AuthGate />`, which handles Firebase auth state and either shows `<LoginScreen />` or `<AppShell />`.
+`app/page.tsx` renders `<AuthGate />`, which handles Firebase auth state and shows either
+`<LoginScreen />` or `<AppShell />`. `app/import/page.tsx` renders `<ImportHandoff />`, a postMessage
+receiver for batches handed off from a local tool.
+
+### Views
+
+`AppShell` switches between three views with `activeView: ActiveView` (`"overview" | "inspector" |
+"database"`, the type declared in `components/Header.tsx`). The sidebar sets it.
+
+**"overview" is the landing view.** Each view is mounted on first visit and then kept mounted, hidden
+with `u-hide` rather than unmounted, so its subscriptions and scroll position survive a switch — see
+`hasVisitedOverview` / `hasVisitedDatabase`. Per-view scroll offsets live in the `scrollPositions` ref.
+
+`Header` renders *outside* that toggle and is gated on `activeView !== "overview"`: it is the open
+document's toolbar (file loader, filename, Share, Export, counts) and has nothing to say on the
+dashboard.
 
 ### State
 
-All app state lives in `components/AppShell.tsx`:
-- `data: ParsedQAFile | null` — loaded file items
-- `filename: string | null` — original filename
-- `editedAnswers: Record<string, string>` — `item.id → edited text`
-- `ratings: Record<string, number>` — `item.id → 1–5 star rating`
-- `contextUrls: Record<string, string>` — `item.id → URL string` (only on unanswered items)
-- `assignees: Record<string, string>` — `item.id → TeamMember.id` of the assigned team member
-- `reviewers: Record<string, string>` — `item.id → TeamMember.id` of the designated reviewer
-- `teamMembers: TeamMember[]` — global team bank, loaded via `subscribeToTeamMembers` (not part of `SessionState`)
-- `filters: Filters` — status/section/search state
-- `sessionId: string | null` — Firebase RTDB session ID if sharing is active
-- `darkMode: boolean` — persisted to `localStorage`
+Document state lives in `components/AppShell.tsx` and flows down as props — no context, no state
+library:
 
-State flows down as props; no context or state management library is used. `suppressNextUpdate` ref prevents own-write echo when syncing to Firebase RTDB.
+- `data: ParsedQAFile | null`, `filename: string | null`
+- `editedAnswers: Record<string, string>` — `item.id → edited text`
+- `ratings: Record<string, number>` — `item.id → 1–5 stars`
+- `contextUrls: Record<string, string>` — `item.id → URL`; **read-only, no writer** (see below)
+- `itemStatus: Record<string, ItemStatus>` — `item.id → "approved"`
+- `sectionAssignees` / `sectionReviewers: Record<string, string>` — section key → `TeamMember.id`
+- `teamMembers: TeamMember[]` — the global team bank (not part of `SessionState`)
+- `filters: Filters`, `darkMode: boolean` (persisted to `localStorage`)
+- `docId: string | null` — the open project; **also its session id** (see below)
+
+There is no echo suppression on remote snapshots. Every snapshot is applied, including the echo of the
+app's own write: RTDB reflects local writes locally before the server confirms them, so an echo can
+never carry a stale value, and writes are per field so an echo for one item cannot clobber another.
+`sameMap` keeps the no-op echoes from causing renders.
+
+The dashboard holds its own state in `components/OverviewView.tsx` rather than in `AppShell`.
 
 ### Firebase
 
-- **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com` accounts. Enforced in `signInWithGoogle` by checking `result.user.email`.
-- **Realtime Database** (`lib/session.ts`): Session sharing. `createSession` writes full `SessionState` to `sessions/<uuid>`. `subscribeToSession` subscribes via `onValue`. Granular updates (`updateAnswer`, `updateRating`, `updateContextUrl`, `updateAssignee`, `updateReviewer`, etc.) write only the changed field. Joining a session reads the `?session=<id>` URL param on mount.
+- **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com`, enforced
+  in `signInWithGoogle`.
+- **RTDB**: four top-level nodes — `/savedFiles`, `/sessions`, `/teamMembers`, `/archivedProjects`
+  (plus `/rfpDatabase` for the unrelated RFP search view).
 
-Session sharing is one-way initiator: only the file-loader can create a session (ShareButton is hidden when already in a live session). Collaborators join via shared URL and receive all updates in real time.
+**A project's session id is its saved-file id.** `sessions/<id>` and `savedFiles/<id>` share a key, so
+opening the same project always joins the same room instead of minting a new one. `ensureSession` seeds
+the room via `runTransaction` (idempotent, and safe when two people open a project at once);
+`subscribeToSession` listens with `onValue`; the granular writers (`updateAnswer`, `updateItemStatus`,
+`setProjectAssignees`, …) each write one field.
+
+Sharing is a URL: `?doc=<id>`. `AppShell` reads it on mount and fetches the document from
+`savedFiles/<id>` rather than waiting on a room snapshot, so a link works even for a project whose room
+was never seeded.
+
+RTDB forbids `.` in keys, so item ids like `"1.1"` are stored encoded. **`encodeKey`/`decodeKey` are
+exported from `lib/session.ts` — use them. Do not hand-roll a second codec.** Section keys derive from
+item ids and carry the same restriction. `projectAssignees` is the exception: it is keyed by
+`TeamMember.id`, a sanitized email, which needs no encoding.
+
+### Projects: `/savedFiles`
+
+`savedFiles/<pushId>` holds `filename`, the full `data`, uploader details, `contentHash`, plus
+dashboard metadata: `itemCount`, `aiUnansweredIds`, `dueDate`, `exportedAt`/`exportedBy`/
+`exportedByEmail`.
+
+`saveFile` refuses duplicates two ways, and the difference matters: a matching `contentHash` means the
+bank already holds this document (open `existingId`), whereas a matching *filename* with different
+content means a different document owns that name (nothing safe to open — surface the clash).
+
+`itemCount` and `aiUnansweredIds` are **denormalized from `data` on purpose**, so the dashboard can size
+its status bands without loading any document. Records predating them are backfilled once by
+`listProjectMetas`.
+
+### The Overview dashboard and its bandwidth rule
+
+**Never read `data` to render the dashboard.** With thirty projects on screen that would transfer the
+whole corpus twice over. The split:
+
+- `listProjectMetas()` (`lib/savedFiles.ts`) — **one-shot** metadata read. One-shot because
+  `savedFiles` records carry their `data`, so a live listener re-transfers every document on every
+  upload, removal, due-date edit and export stamp. `AppShell` bumps `overviewRefreshKey` on each entry
+  to the tab (and after an export) to re-read it instead.
+- `subscribeToProjectOverlays()` (`lib/projects.ts`) — **live**, five small child-path listeners per
+  project: `itemStatus`, `editedAnswers`, `ratings`, `sectionAssignees`, `projectAssignees`. Never
+  `data`. `editedAnswers` is the one heavy member and is needed anyway — see the status model below.
+- `sameOverlays` / `sameMap` guard re-renders. **Nothing in this tree is memoized**, so an unguarded
+  snapshot re-renders the whole grid.
+
+Every `onValue` subscription in this codebase returns **`onValue`'s own unsubscribe**, never
+`off(path)` — `off` detaches every listener at that path and so takes down any overlapping
+subscription. This bit `subscribeToSession`, `subscribeToSavedFiles` and `subscribeToTeamMembers` in
+turn; do not reintroduce it.
+
+### Key data model: three item states
+
+Items have `id` strings in `"section.question"` format (`"1.2"`, `"3.10"`); the section is index 0 after
+splitting on `.`. `parseQAFile` accepts both `"results"` and `"result"`, and disambiguates duplicate
+ids by suffixing them.
+
+Every item is in exactly one of three states. **Only `approved` is stored** — the other two are
+derived, and approval wins over both:
+
+| State | Derivation |
+|---|---|
+| `approved` | `itemStatus[id] === "approved"` |
+| `unanswered` | not approved, `isUnanswered(item.answer)`, and no `editedAnswers[id]` |
+| `ready` | everything else — answered, not signed off |
+
+`isUnanswered` (`lib/utils.ts`) is a prefix test on `"The provided context does not contain"`.
+
+The bands are disjoint and sum to `itemCount`, which is what lets `ProgressWheel` draw them as one
+ring. `computeProjectStats` in `lib/projects.ts` is the single implementation — `SectionGroup` mirrors
+the same three buckets for its header badges. **Ratings are independent of approval**: a five-star
+answer nobody approved is still `ready`. Do not derive approval from stars.
+
+A human filling a blank makes it `ready`, not `unanswered` — that is why the dashboard needs
+`editedAnswers` and not just `itemStatus`.
+
+Unanswered items still have rating disabled (greyed stars).
+
+### Who may approve
+
+**Approving a question is the section reviewer's alone.** `SectionGroup` computes one
+`approveDisabledReason` for the whole section — the reviewer is a property of the section, not of a
+question, so every card in it gets the same answer — and `QuestionCard` disables Approve and shows that
+string as both the hint text and the tooltip. Two cases block it:
+
+- `sectionReviewers[section]` is unset — **nobody** can approve. An unreviewed section is closed, not
+  open: with no reviewer named there is nobody whose sign-off it would be.
+- it is set to someone else — only that person can, named in the message.
+
+**Withdrawing approval is deliberately not gated**: anyone signed in can reopen a question, so a stale
+approval never waits on whoever happens to hold the reviewer field. Do not "fix" that asymmetry — it is
+the requested behaviour. It is **confirmed** instead, through a modal (`confirmingWithdraw` in
+`QuestionCard`, mirroring the revert-to-original one): the click is open to everyone, it undoes a
+sign-off that may not be the clicker's, and only the reviewer can put it back — so the dialog says
+exactly that.
+
+**An approved answer is frozen.** Every writer of `editedAnswers` on the card is withdrawn while
+`approved` is true — the Edit response link, Edit again, and Revert to original — and a muted
+`p-icon--lock-locked` line stands where the Edit control was, pointing at Withdraw approval as the way
+back. Sign-off is on the exact text that was signed off on; letting the text change underneath would
+leave an approval standing over words the reviewer never read. Approval also arrives over the live
+session, so `QuestionCard` has an effect that closes an open editor (and any revert dialog) when
+`approved` flips true: refusing to *open* the editor is not enough when someone else can approve
+mid-edit. **A draft in progress is discarded** in that case; the alternative is a Save button that
+writes over an approved answer. Copy is untouched, and so are **ratings** — a rating is an opinion about
+an answer, not a change to it, and the two have always been independent (see the state table above).
+
+The signed-in user's `TeamMember.id` comes from the `me` memo in `AppShell`, which matches `userEmail`
+against the team bank rather than sanitizing the email into a key locally (that would be a second copy
+of `teamBank`'s codec). It is passed to `SectionGroup` as `myMemberId` and is `undefined` until the bank
+snapshot lands, so cards start disabled and enable a moment later rather than the reverse.
+
+**This is a UI restriction, not an enforced one.** `database.rules.json` lets any authenticated
+`@canonical.com` user write any `sessions/<id>/itemStatus` child, and the rule cannot express this
+check: it would have to derive the section key from the item id, and RTDB rules have no string split.
+Enforcing it in the database would mean re-keying `itemStatus` as `<section>/<item>` so a rule could
+reach `sectionReviewers/$section` — a data migration, not a rules edit.
+
+### Context URLs are read-only
+
+`contextUrls` has **no writer left**. Unanswered questions used to carry a "Context source URL" input
+at the bottom of the card, beside the rating, and it was removed from the UI; `updateContextUrl` /
+`clearContextUrl` went with it. What remains is the read path, deliberately: the map is still seeded by
+`ensureSession`, decoded by `subscribeToSession`, badged in a card's header row when a URL is present,
+and written to the CSV's `Context URL` column. That keeps URLs attached before the removal visible and
+exported instead of silently vanishing, and keeps the export's column layout stable for anything
+consuming it. Do not add a new writer without being asked — removing the input was the request.
+
+### Assignment
+
+**A section is the unit of assignment.** Three independent things can point at a `TeamMember.id`:
+
+- `sessions/<id>/sectionAssignees` — per section, who answers it; self-serve or lead-assigned
+- `sessions/<id>/sectionReviewers` — per section, who reviews it; independent of who answers
+- `sessions/<id>/projectAssignees` — `{ TeamMember.id: true }`, the project's owners, multi-owner,
+  lead-assigned, **no cascade to sections**
+
+The section pair are single values, **not** fan-out writes to every item in the section.
+
+There is deliberately **no per-question assignment**. `SessionState` used to carry `assignees` and
+`reviewers` keyed by `item.id`, written by a pair of selects inside every `QuestionCard`, and they were
+removed: a question could name a different owner than the section it sits in, with nothing to say which
+of the two was meant. Do not reintroduce them — a section-level control that wrote to every item would
+turn one choice into N writes and fight the section field for the same answer. Session nodes written
+before the removal still hold those two maps; nothing reads them, `subscribeToSession` does not decode
+them, and `revertAssignmentsForMember` does not clear them, so a departed member's id can linger there
+invisibly.
+
+`revertAssignmentsForMember` (`lib/session.ts`) clears all three when a member leaves the bank. It
+deliberately does **not** touch `itemStatus`, which holds only `"approved"` and no member id: clearing
+it would withdraw sign-offs across every project because one person left. Revoking a departed member's
+approvals would need the approver recorded alongside the status.
+
+Note `SectionGroup` used to show the assignee and reviewer of a section's *first item* as if they were
+the section's own, as read-only text — so a section could not be assigned at all, and whoever it named
+changed whenever question one changed hands. Both are now real `TeamMemberSelect`s over
+`sectionAssignees` / `sectionReviewers`. The `assignee:` / `reviewer:` values in `FilterBar`'s person
+filter read those same two maps, so filtering by a person selects their whole sections.
+
+`sectionReviewers` is not in `ProjectOverlays`: the dashboard shows owners and progress, and
+`MyAssignments` lists sections from `sectionAssignees` alone, so a sixth listener per project would buy
+nothing. Adding it is a one-line change to `OVERLAY_KEYS` if the dashboard ever needs it.
+
+`MyAssignments` therefore lists **sections and project ownership only**. It used to also badge each row
+with a member's outstanding and approved *questions*; counting the questions inside their sections
+instead would need a per-section item count, which is not denormalized into `savedFiles` metadata — and
+loading a document to work it out is what the bandwidth rule above forbids.
 
 ### Team bank
 
-`/teamMembers` is a global Firebase RTDB path (independent of any session) storing `{ [memberId]: { name: string, createdAt: number } }`. Any authenticated `@canonical.com` user can add or remove entries — it's a shared list across the whole org, not per-session.
+`/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project; any
+authenticated `@canonical.com` user can add or remove. `ensureTeamMember` writes an entry on first
+sign-in. `lib/teamBank.ts` also has `subscribeToTeamMembers` and `removeTeamMember`.
 
-`lib/teamBank.ts` provides:
-- `subscribeToTeamMembers(onUpdate)` — subscribes via `onValue`, returns members as a `TeamMember[]` sorted by name
-- `addTeamMember(name)` — pushes a new entry, returns the generated `memberId`
-- `removeTeamMember(memberId)` — removes the entry from `/teamMembers`
+Pass `teamMembers` down from `AppShell` rather than subscribing again in a new component.
 
-`lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans all sessions under `/sessions` and clears any `assignees`/`reviewers` entries pointing at the removed member, reverting those questions back to "Unassigned". This is called whenever a member is removed from the team bank.
+### Export and the archive
 
-### Key data model
+`lib/csv.ts` owns CSV building and downloading (`buildCsv`, `csvFilenameFor`, `downloadCsv`), shared by
+`ExportButton` and by the dashboard's completed list so a re-download matches the original byte for
+byte. Columns: `Question, Original Answer, Edited Answer, Context URL, Rating`; filename is the source
+JSON name with `-export.csv`. `Context URL` is kept even though nothing can fill it any more — see
+"Context URLs are read-only" above.
 
-Items have `id` strings in `"section.question"` format (e.g. `"1.2"`, `"3.10"`). Section grouping is derived by splitting on `.` and taking index 0. An answer is considered "unanswered" if it starts with `"The provided context does not contain"` (see `lib/utils.ts:isUnanswered`).
+`downloadCsv` returns whether the download was *initiated* — a browser gives no completion callback —
+and that is what gates the removal step of Export-and-remove.
 
-Unanswered items: rating is disabled (shown as greyed stars). Context URL input is only shown for unanswered items.
+On **both** export paths `runExport` also archives the project and stamps the `savedFiles` record.
+Neither is awaited and neither blocks the export: the CSV is already on its way to disk.
 
-The JSON input format supports both `"results"` and `"result"` keys (handled in `lib/utils.ts:parseQAFile`).
+`/archivedProjects` is split in two on purpose:
 
-### Team members & assignment
+```
+archivedProjects/index/<pushId>    -> filename, exportedBy, exportedByEmail, exportedAt,
+                                      itemCount, sourceSessionId
+archivedProjects/payloads/<pushId> -> data, editedAnswers
+```
 
-`TeamMember` (`lib/types.ts`) is `{ id: string, name: string }`, where `id` is the Firebase key under `/teamMembers`. `SessionState` includes `assignees` and `reviewers` maps (`item.id → TeamMember.id`), synced alongside `editedAnswers`/`ratings`/`contextUrls`.
+RTDB returns a whole subtree for any path you read, so nesting alone saves nothing — only reading a
+*different path* does. Held flat, listing completed projects would transfer every archived document,
+and unlike `savedFiles` the archive is never pruned. Split, the list reads `index` and stays small
+forever; a document is fetched (`getArchivedPayload`) only when someone asks to re-download it. Both
+halves are written in one multi-path `update`, so an entry cannot be listed without its payload.
 
-### Export format
+The completed list enumerates the archive, **not `/sessions`** — `/sessions` keeps a node per document
+ever opened and never sheds one, so listing it would show every abandoned project as finished.
 
-CSV (not JSON). Columns: `Question, Original Answer, Edited Answer, Context URL, Rating`. Filename derives from the source JSON filename with `-export.csv` suffix.
+### Static export constraint
+
+`next.config.js` sets `output: 'export'`. No API routes, no server components, no server actions, no
+dynamic routes — all aggregation happens in the browser, and new screens are client views inside
+`AppShell`, not routes. Navigation is `history.replaceState` on query params (`syncDocParam`).
 
 ### Component tree
 
 ```
 page.tsx
 └── AuthGate — Firebase auth state listener
-    ├── LoginScreen — Google Sign-In button (shown when unauthenticated)
-    └── AppShell (all state) — shown when authenticated
-        ├── Header — sticky bar with logo lockup, dark mode toggle, FileLoader, filename badge, answered/unanswered counts
-        │   ├── FileLoader — drag-and-drop or click-to-upload, calls parseQAFile
-        │   └── [Manage Users panel] — toggled by "Manage Users" button in the header; add/remove team bank members
-        ├── [user bar] — shows signed-in email + sign out button
-        ├── [live session banner] — shown when sessionId is set
-        ├── FilterBar — status toggle, section dropdown, search input
-        └── SectionGroup (per section)
-            │   [assignee/reviewer indicator] — shows assigned name / "Reviewer: <name>" or "Unassigned" on the section header row, looked up from teamMembers via assignees/reviewers
-            └── QuestionCard (per item)
-                ├── CopyButton (inline, for original and edited answers)
-                ├── StarRating — 1–5 stars; disabled for unanswered items
-                ├── AssignmentRow — assignee and reviewer dropdowns, populated from teamMembers
-                └── ContextUrlRow — URL input; only rendered for unanswered items
-        └── [export footer]
-            ├── ShareButton — creates Firebase session, copies URL to clipboard (hidden in live sessions)
-            └── ExportButton — downloads CSV
+    ├── LoginScreen
+    └── AppShell (document state, view switching)
+        ├── Sidebar — Overview / Collaborative UI / RFP Database, dark mode, user, sign out
+        ├── Header — hidden on Overview
+        │   ├── FileLoader — upload or pick a saved project; remove
+        │   ├── ShareButton — copies the ?doc= link
+        │   ├── ExportButton — CSV, archive, optional export-and-remove
+        │   └── [Manage Users panel]
+        ├── OverviewView — the dashboard (own state; metadata + overlay subscriptions)
+        │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, archived
+        │   ├── [sort / owner / status controls, bulk-assign bar]
+        │   ├── ProjectCard (per active project, in a responsive grid)
+        │   │   ├── ProgressWheel — three hoverable bands, custom SVG
+        │   │   ├── DueDateField — inline date editing
+        │   │   └── TeamMemberMultiSelect — project owners
+        │   ├── CompletedProjectsList — archive rows; reopen or regenerate CSV
+        │   └── MyAssignments — the signed-in user's sections + owned projects
+        ├── [live session banner]
+        ├── FilterBar — status toggle, section/person dropdown, search
+        ├── SectionGroup (per section)
+        │   ├── TeamMemberSelect ×2 — section assignee + reviewer
+        │   │                          (sectionAssignees / sectionReviewers)
+        │   └── QuestionCard (per item) — no assignment controls; see Assignment
+        │       ├── CopyButton, StarRating
+        │       └── [Approve / Withdraw approval] — the only writer of itemStatus
+        └── RfpDatabaseView — unrelated RFP search over /rfpDatabase
 ```
 
 ### Vanilla Framework & dark mode
@@ -169,4 +390,11 @@ Required `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`):
 
 Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel project config (`.vercel/`).
 
-`database.rules.json` defines RTDB access rules for `/sessions` and `/teamMembers` (both restricted to authenticated `@canonical.com` users), and `firebase.json` points the `database` deploy target at `database.rules.json`. Rule changes are not live until deployed — run `firebase deploy --only database`, which requires access to the `canonical-req-8605` Firebase project.
+`database.rules.json` defines RTDB access rules for `/sessions`, `/teamMembers`, `/savedFiles`,
+`/rfpDatabase` and `/archivedProjects` — all restricted to authenticated `@canonical.com` users — and
+`firebase.json` points the `database` deploy target at it.
+
+**Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
+access to the `canonical-req-8605` Firebase project. `/archivedProjects` is a new node: until that
+deploy lands, every archive write is rejected by the rules, so exports will download their CSV but the
+completed list will stay empty and report the failure.

@@ -72,7 +72,10 @@ export default function TeamMemberSelect({
 
   return (
     <div className="team-member-select" ref={wrapperRef}>
-      <span className="u-text--muted p-text--small">{label}</span>
+      {/* Gated, not always rendered: `p-text--small` extends Vanilla's `%small-text`, which carries a
+          0.95rem bottom margin. An empty span still claims that margin, and in this column flex it
+          pushed the trigger out of any fixed-height container the select was dropped into. */}
+      {label && <span className="u-text--muted p-text--small">{label}</span>}
       <button
         ref={buttonRef}
         type="button"

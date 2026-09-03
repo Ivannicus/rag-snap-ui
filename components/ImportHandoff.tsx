@@ -5,6 +5,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { signOutUser } from "@/lib/auth";
 import { saveFile } from "@/lib/savedFiles";
+import { newSessionState } from "@/lib/session";
 import { parseQAFile } from "@/lib/utils";
 import {
   PROTOCOL,
@@ -29,20 +30,6 @@ interface Sender {
 interface PendingPayload {
   data: ParsedQAFile;
   filename: string;
-}
-
-// Build a fresh SessionState for a handed-off batch — the results plus empty overlay maps, since a
-// brand-new import carries no edits/ratings/assignments yet.
-function toSessionState(data: ParsedQAFile, filename: string): SessionState {
-  return {
-    data,
-    filename,
-    editedAnswers: {},
-    ratings: {},
-    contextUrls: {},
-    assignees: {},
-    reviewers: {},
-  };
 }
 
 export default function ImportHandoff() {
@@ -104,7 +91,7 @@ export default function ImportHandoff() {
       }
       // ACK only after the write durably succeeds.
       reply(makeAck(nonce));
-      setLoadedState(toSessionState(data, filename));
+      setLoadedState(newSessionState(data, filename));
       setStatus("loaded");
     },
     [reply, replyError]

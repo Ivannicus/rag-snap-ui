@@ -5,26 +5,36 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
+import OverviewView from "@/components/OverviewView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
 import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
 import {
   ensureSession,
+  newSessionState,
   subscribeToSession,
   updateAnswer,
   clearAnswer,
   updateRating,
   clearRating,
-  updateContextUrl,
-  clearContextUrl,
-  updateAssignee,
-  clearAssignee,
-  updateReviewer,
-  clearReviewer,
+  updateItemStatus,
+  clearItemStatus,
+  updateSectionAssignee,
+  clearSectionAssignee,
+  updateSectionReviewer,
+  clearSectionReviewer,
 } from "@/lib/session";
 import { getSavedFile } from "@/lib/savedFiles";
 import { subscribeToTeamMembers } from "@/lib/teamBank";
-import type { ParsedQAFile, Filters, QAItem, SessionState, TeamMember, PersonFilterOption } from "@/lib/types";
+import type {
+  ParsedQAFile,
+  Filters,
+  ItemStatus,
+  QAItem,
+  SessionState,
+  TeamMember,
+  PersonFilterOption,
+} from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
 
@@ -77,18 +87,29 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [contextUrls, setContextUrls] = useState<Record<string, string>>(
     () => initialState?.contextUrls ?? {}
   );
-  const [assignees, setAssignees] = useState<Record<string, string>>(
-    () => initialState?.assignees ?? {}
+  const [itemStatus, setItemStatus] = useState<Record<string, ItemStatus>>(
+    () => initialState?.itemStatus ?? {}
   );
-  const [reviewers, setReviewers] = useState<Record<string, string>>(
-    () => initialState?.reviewers ?? {}
+  const [sectionAssignees, setSectionAssignees] = useState<Record<string, string>>(
+    () => initialState?.sectionAssignees ?? {}
+  );
+  const [sectionReviewers, setSectionReviewers] = useState<Record<string, string>>(
+    () => initialState?.sectionReviewers ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
   // doc always joins the same room instead of minting a new random session.
   const [docId, setDocId] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<ActiveView>("inspector");
+  // The dashboard is where a lead starts: which projects exist and who is on them is the question you
+  // have before you have a document open, so it is the landing view rather than the inspector.
+  const [activeView, setActiveView] = useState<ActiveView>("overview");
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
+  const [hasVisitedOverview, setHasVisitedOverview] = useState(true);
+  // Bumped on each entry to the dashboard. Its project list is read one-shot rather than watched, so
+  // this is what picks up projects added or exported elsewhere without a reload.
+  const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
+  // The project whose document is being fetched from a dashboard click, so its card can say so.
+  const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   // Set when something that should have persisted did not. Without this the UI shows the change as
   // though it saved, because local state is updated independently of the write.
   const [errorNotice, setErrorNotice] = useState<{ title: string; message: string } | null>(null);
@@ -110,16 +131,29 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   }, [docId]);
 
   // Per-view scroll position, restored when switching back
-  const scrollPositions = useRef<Record<ActiveView, number>>({ inspector: 0, database: 0 });
+  const scrollPositions = useRef<Record<ActiveView, number>>({
+    overview: 0,
+    inspector: 0,
+    database: 0,
+  });
 
-  function handleChangeView(view: ActiveView) {
-    scrollPositions.current[activeView] = window.scrollY;
-    setActiveView(view);
-  }
+  const handleChangeView = useCallback((view: ActiveView) => {
+    setActiveView((previous) => {
+      scrollPositions.current[previous] = window.scrollY;
+      // Re-read the project list on each arrival, so the dashboard is never showing a list from
+      // before the file that was just loaded, exported or removed.
+      if (view === "overview" && previous !== "overview") {
+        setOverviewRefreshKey((key) => key + 1);
+      }
+      return view;
+    });
+  }, []);
 
-  // Mount the RFP Database view on first visit, then keep it mounted (never unmount again)
+  // Mount each secondary view on first visit, then keep it mounted (never unmount again), so its
+  // subscriptions and scroll position survive switching away.
   useEffect(() => {
     if (activeView === "database") setHasVisitedDatabase(true);
+    if (activeView === "overview") setHasVisitedOverview(true);
   }, [activeView]);
 
   // Restore the new view's scroll position after the DOM updates, before paint
@@ -146,6 +180,22 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   }, []);
 
   /**
+   * The signed-in user's team-bank entry, or null before it arrives (or if they are not in the bank).
+   *
+   * Approving is the section reviewer's to do, so the cards need to know which `TeamMember.id` "me"
+   * is. Matched on email rather than by sanitizing `userEmail` into a key here, which would be a
+   * second copy of `teamBank`'s codec — the same mistake `encodeKey` exists to prevent. `OverviewView`
+   * resolves itself the same way.
+   */
+  const me = useMemo(
+    () =>
+      userEmail
+        ? teamMembers.find((m) => m.email.toLowerCase() === userEmail.toLowerCase()) ?? null
+        : null,
+    [teamMembers, userEmail]
+  );
+
+  /**
    * Apply a remote snapshot.
    *
    * There is no echo suppression: every snapshot is applied, including the echo of our own write.
@@ -164,8 +214,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers((prev) => (sameMap(prev, state.editedAnswers) ? prev : state.editedAnswers));
     setRatings((prev) => (sameMap(prev, state.ratings) ? prev : state.ratings));
     setContextUrls((prev) => (sameMap(prev, state.contextUrls) ? prev : state.contextUrls));
-    setAssignees((prev) => (sameMap(prev, state.assignees) ? prev : state.assignees));
-    setReviewers((prev) => (sameMap(prev, state.reviewers) ? prev : state.reviewers));
+    setItemStatus((prev) => (sameMap(prev, state.itemStatus) ? prev : state.itemStatus));
+    setSectionAssignees((prev) =>
+      sameMap(prev, state.sectionAssignees) ? prev : state.sectionAssignees
+    );
+    setSectionReviewers((prev) =>
+      sameMap(prev, state.sectionReviewers) ? prev : state.sectionReviewers
+    );
   }, []);
 
   // One listener per doc. Keying the effect on docId makes React tear the previous listener down
@@ -205,8 +260,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setEditedAnswers({});
     setRatings({});
     setContextUrls({});
-    setAssignees({});
-    setReviewers({});
+    setItemStatus({});
+    setSectionAssignees({});
+    setSectionReviewers({});
   }, []);
 
   const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
@@ -227,15 +283,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     // there is nothing here for the person who loaded it to fix — but the seed is what carries this
     // doc into its room, and discarding the news that it failed is what let someone hand out a share
     // link that could only ever open onto nothing.
-    ensureSession(loadedDocId, {
-      data: loaded,
-      filename: name,
-      editedAnswers: {},
-      ratings: {},
-      contextUrls: {},
-      assignees: {},
-      reviewers: {},
-    }).catch(() =>
+    ensureSession(loadedDocId, newSessionState(loaded, name)).catch(() =>
       showError(
         "Live sharing may not be ready",
         "This file is open and your changes are kept, but the shared session for it could not be started. People opening the share link may not see your edits until you reload this page."
@@ -377,47 +425,92 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     writeToSession((sid) => clearAnswer(sid, id));
   }, [writeToSession]);
 
-  const handleSaveContextUrl = useCallback((id: string, url: string) => {
-    setContextUrls((prev) => ({ ...prev, [id]: url }));
-    writeToSession((sid) => updateContextUrl(sid, id, url));
+  const handleApprove = useCallback((id: string) => {
+    setItemStatus((prev) => ({ ...prev, [id]: "approved" }));
+    writeToSession((sid) => updateItemStatus(sid, id, "approved"));
   }, [writeToSession]);
 
-  const handleClearContextUrl = useCallback((id: string) => {
-    setContextUrls((prev) => {
+  const handleUnapprove = useCallback((id: string) => {
+    setItemStatus((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
     });
-    writeToSession((sid) => clearContextUrl(sid, id));
+    writeToSession((sid) => clearItemStatus(sid, id));
   }, [writeToSession]);
 
-  const handleSaveAssignee = useCallback((id: string, memberId: string) => {
-    setAssignees((prev) => ({ ...prev, [id]: memberId }));
-    writeToSession((sid) => updateAssignee(sid, id, memberId));
+  const handleSaveSectionAssignee = useCallback((sectionKey: string, memberId: string) => {
+    setSectionAssignees((prev) => ({ ...prev, [sectionKey]: memberId }));
+    writeToSession((sid) => updateSectionAssignee(sid, sectionKey, memberId));
   }, [writeToSession]);
 
-  const handleClearAssignee = useCallback((id: string) => {
-    setAssignees((prev) => {
+  const handleClearSectionAssignee = useCallback((sectionKey: string) => {
+    setSectionAssignees((prev) => {
       const next = { ...prev };
-      delete next[id];
+      delete next[sectionKey];
       return next;
     });
-    writeToSession((sid) => clearAssignee(sid, id));
+    writeToSession((sid) => clearSectionAssignee(sid, sectionKey));
   }, [writeToSession]);
 
-  const handleSaveReviewer = useCallback((id: string, memberId: string) => {
-    setReviewers((prev) => ({ ...prev, [id]: memberId }));
-    writeToSession((sid) => updateReviewer(sid, id, memberId));
+  const handleSaveSectionReviewer = useCallback((sectionKey: string, memberId: string) => {
+    setSectionReviewers((prev) => ({ ...prev, [sectionKey]: memberId }));
+    writeToSession((sid) => updateSectionReviewer(sid, sectionKey, memberId));
   }, [writeToSession]);
 
-  const handleClearReviewer = useCallback((id: string) => {
-    setReviewers((prev) => {
+  const handleClearSectionReviewer = useCallback((sectionKey: string) => {
+    setSectionReviewers((prev) => {
       const next = { ...prev };
-      delete next[id];
+      delete next[sectionKey];
       return next;
     });
-    writeToSession((sid) => clearReviewer(sid, id));
+    writeToSession((sid) => clearSectionReviewer(sid, sectionKey));
   }, [writeToSession]);
+
+  /**
+   * A document was exported and archived.
+   *
+   * Both the export stamp and the archive entry live outside anything the dashboard subscribes to, so
+   * without this its completed list would keep the project in the active grid until the next time the
+   * tab was entered from elsewhere.
+   */
+  const handleExported = useCallback(() => {
+    setOverviewRefreshKey((key) => key + 1);
+  }, []);
+
+  /**
+   * Open a project from the dashboard.
+   *
+   * The dashboard deliberately holds no documents, so the content has to be fetched before anything
+   * can be shown — the same route the `?doc=` link takes. `handleLoad` then does the rest: it clears
+   * the previous document's overlays, repoints the session subscription at the new room, seeds that
+   * room if nobody has opened this project before, and syncs the address bar.
+   */
+  const handleOpenProject = useCallback(
+    (projectId: string) => {
+      setOpeningProjectId(projectId);
+      getSavedFile(projectId)
+        .then((saved) => {
+          if (!saved) {
+            showError(
+              "That project is no longer available",
+              "It has been removed from the shared list since this dashboard was loaded. Switch away and back to refresh the list."
+            );
+            return;
+          }
+          handleLoad(saved.data, saved.filename, saved.id);
+          handleChangeView("inspector");
+        })
+        .catch(() =>
+          showError(
+            "Could not open that project",
+            "Its results could not be loaded. Check your connection, then try again."
+          )
+        )
+        .finally(() => setOpeningProjectId(null));
+    },
+    [handleLoad, handleChangeView, showError]
+  );
 
   const unansweredCount = useMemo(
     () =>
@@ -434,26 +527,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     [data]
   );
 
-  // Per-person filter options, computed dynamically from who actually has
-  // assignments/reviews in the currently loaded file (not the full team bank).
+  // Per-person filter options, computed dynamically from who actually owns or reviews a section of
+  // the currently loaded file (not the full team bank). Read off the section maps because sections
+  // are the only unit work is handed out in — this used to scan every item's own assignee.
   const personFilterOptions = useMemo((): PersonFilterOption[] => {
     if (!data) return [];
 
-    function distinctMemberIds(roleMap: Record<string, string>): Set<string> {
-      const ids = new Set<string>();
-      for (const item of data!.items) {
-        const id = roleMap[item.id];
-        if (id) ids.add(id);
-      }
-      return ids;
-    }
-
     function toOptions(
-      ids: Set<string>,
+      roleMap: Record<string, string>,
       prefix: string,
       suffix: string
     ): PersonFilterOption[] {
-      return Array.from(ids)
+      return Array.from(new Set(Object.values(roleMap)))
         .map((id) => teamMembers.find((m) => m.id === id))
         .filter((m): m is TeamMember => m !== undefined)
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -461,10 +546,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     }
 
     return [
-      ...toOptions(distinctMemberIds(assignees), "assignee", "Assignments"),
-      ...toOptions(distinctMemberIds(reviewers), "reviewer", "Reviews"),
+      ...toOptions(sectionAssignees, "assignee", "Sections"),
+      ...toOptions(sectionReviewers, "reviewer", "Reviews"),
     ];
-  }, [data, assignees, reviewers, teamMembers]);
+  }, [data, sectionAssignees, sectionReviewers, teamMembers]);
 
   // If the active person-filter's option disappears (e.g. their last assignment
   // was cleared), fall back to "All sections" rather than silently showing nothing.
@@ -482,14 +567,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     const { status, section, search } = filters;
     const term = search.toLowerCase();
 
+    // The person filter selects whole sections, so the matching set is read straight off the
+    // section-keyed maps rather than reconstructed from which items a member happened to hold.
     let matchingSections: Set<string> | null = null;
     if (section.startsWith("assignee:") || section.startsWith("reviewer:")) {
       const [kind, memberId] = section.split(":", 2);
-      const roleMap = kind === "assignee" ? assignees : reviewers;
+      const roleMap = kind === "assignee" ? sectionAssignees : sectionReviewers;
       matchingSections = new Set(
-        data.items
-          .filter((i) => roleMap[i.id] === memberId)
-          .map((i) => i.id.split(".")[0])
+        Object.entries(roleMap)
+          .filter(([, id]) => id === memberId)
+          .map(([sectionKey]) => sectionKey)
       );
     }
 
@@ -511,7 +598,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers, assignees, reviewers]);
+  }, [data, filters, editedAnswers, sectionAssignees, sectionReviewers]);
 
   const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
 
@@ -527,22 +614,41 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       />
 
       <div className="app-content">
-        <Header
-          data={data}
-          filename={filename}
-          unansweredCount={unansweredCount}
-          totalCount={data?.items.length ?? 0}
-          onLoad={handleLoad}
-          teamMembers={teamMembers}
-          docId={docId}
-          editedAnswers={editedAnswers}
-          ratings={ratings}
-          contextUrls={contextUrls}
-          onError={showError}
-          onDocRemoved={handleDocRemoved}
-        />
+        {/* The header is the open document's toolbar — file loader, filename, share, export, counts —
+            so it has nothing to say on the dashboard, which is about the projects you have not opened.
+            It renders outside the view toggle, so it is gated here rather than hidden by a class. */}
+        {activeView !== "overview" && (
+          <Header
+            data={data}
+            filename={filename}
+            unansweredCount={unansweredCount}
+            totalCount={data?.items.length ?? 0}
+            onLoad={handleLoad}
+            teamMembers={teamMembers}
+            docId={docId}
+            editedAnswers={editedAnswers}
+            ratings={ratings}
+            contextUrls={contextUrls}
+            onError={showError}
+            onDocRemoved={handleDocRemoved}
+            onExported={handleExported}
+          />
+        )}
 
-        <div className={activeView === "database" ? "u-hide" : ""}>
+        {hasVisitedOverview && (
+          <div className={activeView === "overview" ? "" : "u-hide"}>
+            <OverviewView
+              teamMembers={teamMembers}
+              userEmail={userEmail}
+              onOpenProject={handleOpenProject}
+              openingProjectId={openingProjectId}
+              onError={showError}
+              refreshKey={overviewRefreshKey}
+            />
+          </div>
+        )}
+
+        <div className={activeView === "inspector" ? "" : "u-hide"}>
           {/* Live session indicator */}
           {docId && (
             <div className="live-session-banner">
@@ -589,14 +695,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                         onSaveRating={handleSaveRating}
                         onClearRating={handleClearRating}
                         contextUrls={contextUrls}
-                        onSaveContextUrl={handleSaveContextUrl}
-                        onClearContextUrl={handleClearContextUrl}
-                        assignees={assignees}
-                        onSaveAssignee={handleSaveAssignee}
-                        onClearAssignee={handleClearAssignee}
-                        reviewers={reviewers}
-                        onSaveReviewer={handleSaveReviewer}
-                        onClearReviewer={handleClearReviewer}
+                        itemStatus={itemStatus}
+                        onApprove={handleApprove}
+                        onUnapprove={handleUnapprove}
+                        sectionAssignee={sectionAssignees[section]}
+                        onSaveSectionAssignee={handleSaveSectionAssignee}
+                        onClearSectionAssignee={handleClearSectionAssignee}
+                        sectionReviewer={sectionReviewers[section]}
+                        onSaveSectionReviewer={handleSaveSectionReviewer}
+                        onClearSectionReviewer={handleClearSectionReviewer}
+                        myMemberId={me?.id}
                         teamMembers={teamMembers}
                       />
                     ))}
@@ -654,7 +762,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
         </div>
 
         {hasVisitedDatabase && (
-          <div className={activeView === "inspector" ? "u-hide" : ""}>
+          // Tested for equality rather than inequality: with a third view, "not the inspector" was
+          // also true on the dashboard, which would have shown the database underneath it.
+          <div className={activeView === "database" ? "" : "u-hide"}>
             <RfpDatabaseView />
           </div>
         )}

@@ -8,7 +8,7 @@ import { removeTeamMember } from "@/lib/teamBank";
 import { revertAssignmentsForMember } from "@/lib/session";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
 
-export type ActiveView = "inspector" | "database";
+export type ActiveView = "overview" | "inspector" | "database";
 
 interface Props {
   data: ParsedQAFile | null;
@@ -25,6 +25,8 @@ interface Props {
   onError: (title: string, message: string) => void;
   /** Called with the removed doc's saved-file id, from either removal path. */
   onDocRemoved: (docId: string) => void;
+  /** Called once an export has been archived, so the dashboard can re-read its lists. */
+  onExported: () => void;
 }
 
 export default function Header({
@@ -40,6 +42,7 @@ export default function Header({
   contextUrls,
   onError,
   onDocRemoved,
+  onExported,
 }: Props) {
   const answeredCount = totalCount - unansweredCount;
   const [managingUsers, setManagingUsers] = useState(false);
@@ -140,6 +143,7 @@ export default function Header({
                   docId={docId}
                   onError={onError}
                   onDocRemoved={onDocRemoved}
+                  onExported={onExported}
                 />
               </div>
             )}

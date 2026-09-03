@@ -1,6 +1,7 @@
 import { ref, push, set, get, remove, onValue, update } from 'firebase/database';
 import { db } from './firebase';
-import type { ParsedQAFile, SavedFile } from './types';
+import { isUnanswered } from './utils';
+import type { ParsedQAFile, ProjectMeta, SavedFile } from './types';
 
 /**
  * Shape of a single record under the `savedFiles` node.
@@ -17,6 +18,19 @@ interface StoredDoc {
   uploadedAt: number;
   /** Absent on records written before content hashing was introduced. */
   contentHash?: string;
+  /**
+   * Denormalized from `data`, so the dashboard can size a project's status bands without loading its
+   * questions and answers. Both absent on records written before the dashboard existed;
+   * `listProjectMetas` computes and backfills them.
+   */
+  itemCount?: number;
+  aiUnansweredIds?: string[];
+  /** ISO date string. Absent when no due date has been set. */
+  dueDate?: string;
+  /** Absent until the project has been exported at least once. */
+  exportedAt?: number;
+  exportedBy?: string;
+  exportedByEmail?: string;
 }
 
 /** Lightweight per-doc metadata, with no `data` payload. */
@@ -110,6 +124,92 @@ export async function listDocs(): Promise<DocMeta[]> {
   return Object.entries(val)
     .map(([id, stored]) => toDocMeta(id, stored))
     .sort((a, b) => b.uploadedAt - a.uploadedAt);
+}
+
+/** The ids the AI left blank, by the same test the inspector uses to colour a card. */
+function aiUnansweredIdsOf(data: ParsedQAFile): string[] {
+  return data.items.filter((item) => isUnanswered(item.answer)).map((item) => item.id);
+}
+
+/**
+ * One-shot read of every project's dashboard metadata, newest first.
+ *
+ * This is the dashboard's only read of `savedFiles`, and it is one-shot on purpose. `savedFiles`
+ * records carry their full `data`, so a live listener here would re-transfer every project's
+ * questions and answers on every upload, removal, due-date edit and export stamp. The project list
+ * changes rarely and only through actions the app itself takes, so it is re-read when the dashboard
+ * is opened and after those actions instead of being watched. The per-project *overlays*, which
+ * change constantly and are small, are what get live listeners — see `lib/projects.ts`.
+ *
+ * Records predating the dashboard have no `itemCount` or `aiUnansweredIds`. Both are derived here
+ * from the `data` this read already holds and written back, so each legacy record is computed at
+ * most once. That write is deliberately not awaited and its failure ignored, for the same reason
+ * `storedContentHash` ignores its own: it is a cache fill, and losing it costs one recomputation
+ * next time rather than a wrong answer now.
+ */
+export async function listProjectMetas(): Promise<ProjectMeta[]> {
+  const snapshot = await get(ref(db, 'savedFiles'));
+  const val = snapshot.val() as Record<string, StoredDoc> | null;
+  if (!val) return [];
+
+  const backfill: Record<string, number | string[]> = {};
+  const metas = Object.entries(val).map(([id, stored]) => {
+    const items = stored.data?.items;
+    const hasItems = Array.isArray(items);
+
+    let itemCount = stored.itemCount;
+    let aiUnansweredIds = stored.aiUnansweredIds;
+
+    if (itemCount === undefined && hasItems) {
+      itemCount = items.length;
+      backfill[`${id}/itemCount`] = itemCount;
+    }
+    if (aiUnansweredIds === undefined && hasItems) {
+      aiUnansweredIds = aiUnansweredIdsOf(stored.data);
+      backfill[`${id}/aiUnansweredIds`] = aiUnansweredIds;
+    }
+
+    return {
+      id,
+      filename: stored.filename,
+      uploadedByName: stored.uploadedByName,
+      uploadedByEmail: stored.uploadedByEmail,
+      uploadedAt: stored.uploadedAt,
+      itemCount: itemCount ?? 0,
+      aiUnansweredIds: aiUnansweredIds ?? [],
+      dueDate: stored.dueDate ?? null,
+      exportedAt: stored.exportedAt ?? null,
+      exportedBy: stored.exportedBy ?? null,
+      exportedByEmail: stored.exportedByEmail ?? null,
+    };
+  });
+
+  if (Object.keys(backfill).length > 0) {
+    void update(ref(db, 'savedFiles'), backfill).catch(() => {});
+  }
+
+  return metas.sort((a, b) => b.uploadedAt - a.uploadedAt);
+}
+
+/** Set or clear a project's due date. Pass null to clear. */
+export function setDueDate(fileId: string, isoDate: string | null): Promise<void> {
+  return update(ref(db, `savedFiles/${fileId}`), { dueDate: isoDate ?? null });
+}
+
+/**
+ * Stamp a project as exported.
+ *
+ * Recorded on the `savedFiles` record rather than only in the archive so that a project which was
+ * exported but deliberately kept in the shared list can still be told apart, on the dashboard, from
+ * one nobody has exported yet.
+ */
+export function markExported(
+  fileId: string,
+  exportedBy: string,
+  exportedByEmail: string,
+  exportedAt: number
+): Promise<void> {
+  return update(ref(db, `savedFiles/${fileId}`), { exportedAt, exportedBy, exportedByEmail });
 }
 
 export function subscribeToSavedFiles(
@@ -235,6 +335,9 @@ export async function saveFile({
     uploadedByEmail,
     uploadedAt: Date.now(),
     contentHash,
+    // Denormalized now, while the data is in hand, so the dashboard never has to load it back.
+    itemCount: data.items.length,
+    aiUnansweredIds: aiUnansweredIdsOf(data),
   });
   return { ok: true, id: newRef.key as string };
 }

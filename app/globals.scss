@@ -217,13 +217,6 @@
   }
 }
 
-.section-header__assignment {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  margin-left: 0.375rem;
-}
-
 .section-header__rule {
   flex: 1 1 auto;
   height: 1px;
@@ -258,6 +251,59 @@
     background-color: rgba(255, 215, 0, 0.18);
     border-color: #b8860b;
     gap: 0.25rem;
+  }
+
+  // ── The three workflow bands ──
+  // Named after the status rather than after a Vanilla tone, so a badge, a wheel segment and a card
+  // border showing the same status cannot end up different colours. Kept in step with
+  // `STATUS_BANDS` in lib/projects.ts and with `.progress-wheel__band--*` below.
+  &--band-approved {
+    background-color: var(--vf-color-background-positive-default);
+    border-color: var(--vf-color-border-positive);
+    gap: 0.25rem;
+  }
+
+  &--band-ready {
+    background-color: var(--vf-color-background-information-default);
+    border-color: var(--vf-color-border-information);
+  }
+
+  &--band-unanswered {
+    background-color: var(--vf-color-background-negative-default);
+    border-color: var(--vf-color-border-negative);
+  }
+
+  // Wraps a select rather than text, so the horizontal padding gets out of the way. The height stays
+  // the badge row's own — `.section-header .section-header__block` (0,2,0) sets it and would beat a
+  // `height: auto` here anyway — which leaves the trigger 1.375rem of content box to sit in.
+  &--select {
+    gap: 0.375rem;
+    padding: 0.125rem 0.375rem;
+
+    .team-member-select {
+      flex: 0 1 10rem;
+    }
+
+    // A Vanilla button is `font-size: 1rem; line-height: 1.5rem`, so left alone its text is both
+    // bigger than the badge's 0.875rem and taller than the badge itself, and spills out of the top
+    // and bottom borders. Both have to come down for the trigger to sit inside its own height.
+    .team-member-select__trigger {
+      border: none;
+      background: none;
+      height: 1.375rem;
+      padding: 0 0.25rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      gap: 0.375rem;
+    }
+
+    // The default 1.5rem avatar is taller than the trigger. Sized down here rather than by passing
+    // `size="small"`, because the same component renders at full size inside a question card, where
+    // there is room for it.
+    .team-member-avatar {
+      width: 1.25rem;
+      height: 1.25rem;
+    }
   }
 }
 
@@ -305,24 +351,6 @@
   margin-left: 0.25rem;
 }
 
-.context-url-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.context-url-row__link,
-.context-url-row__input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.assignment-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
 .team-member-select {
   display: flex;
   flex-direction: column;
@@ -340,7 +368,22 @@
   text-align: left;
   border-color: var(--vf-color-border-high-contrast);
 
+  // One fixed size for the chevron in every state.
+  //
+  // Vanilla's icons hide their own text with `overflow: hidden`, which makes a flex item's automatic
+  // minimum size 0 — so the arrow was free to shrink, and it did: with nobody assigned the trigger's
+  // content fitted and the arrow drew at full size, while a long member's name overflowed and the
+  // flex algorithm took the shortfall out of the label *and* the arrow together. The size of the
+  // arrow therefore tracked the length of the name. `flex: 0 0 auto` takes it out of that
+  // negotiation, leaving the label — which has `min-width: 0` and its own `overflow: hidden` — to
+  // absorb every overflow by ellipsis, which is what it is for.
+  //
+  // Both dimensions are set: Vanilla icons are background images sized `contain` on a square box, so
+  // a height alone would leave the arrow drawn at its width.
   i {
+    flex: 0 0 auto;
+    width: 0.875rem;
+    height: 0.875rem;
     margin-left: auto;
   }
 }
@@ -396,6 +439,21 @@
 
   &--edited {
     border-color: var(--vf-color-border-caution);
+  }
+
+  // Approval overrides the other two, matching the precedence the status derivation uses: a signed-off
+  // question is done whether or not it was blank or edited on the way there.
+  &--approved {
+    border-color: var(--vf-color-border-positive);
+    background-color: var(--vf-color-background-positive-default);
+  }
+
+  // Awaiting review — the AI answered it and nobody has signed it off. Border only, no background tint:
+  // this is the most common state by far, so tinting it would leave a page of cards all shouting at
+  // once and drown out the ones that actually need attention. Blue matches the ready band on the wheel
+  // and the "Ready" badge on the section header.
+  &--ready {
+    border-color: var(--vf-color-border-information);
   }
 }
 
@@ -974,4 +1032,619 @@ mark.rfp-highlight {
   align-items: center;
   gap: 0.75rem;
   margin-top: 0.75rem;
+}
+
+/* ══ Overview dashboard ══ */
+
+// One size for every control in a project card's field rows — the Team select and the Due date button.
+// Defined once as variables because the whole point is that they match: two literals would drift the
+// first time one of them was tuned.
+//
+// The width is set by the Due button rather than by Team: five avatars (`MAX_TRIGGER_AVATARS`), a "+N"
+// circle and a chevron come to ~118px, and a formatted date plus its icon to ~116px, with the year
+// formatting longer in some locales. 9.5rem gives 134px of content space, so both clear it — but only
+// just, so raising `MAX_TRIGGER_AVATARS` past 5 means widening this too: a sixth avatar leaves 2px.
+// The height clears a 1.25rem avatar plus its 2px ring.
+$card-field-width: 9.5rem;
+$card-field-height: 1.75rem;
+
+// Wider than the rest of the app. `.app-main` is capped at 64rem, which fits one column of prose but
+// squeezes a three-column card grid; 80rem is Vanilla's own fixed-width container width.
+.overview {
+  max-width: 80rem;
+}
+
+// `.p-text--small` is a *paragraph* style: it carries `margin-bottom: 0.95rem` and a 0.05rem top nudge
+// for setting body copy. The dashboard uses it for inline labels instead, and in a flex row it is the
+// margin box that `align-items: center` centres — so that bottom margin lifted every such label about
+// half its own height above the control it sits beside, and in a flex column it opened a gap nobody
+// asked for.
+//
+// Reset once here, for spans only: an actual paragraph in this view still wants its spacing, and
+// `span` keeps this from touching one. `.overview` plus the element selector clears the 0,1,0 of
+// `.p-text--small` without needing `!important`.
+.overview span.p-text--small {
+  margin-bottom: 0;
+  padding-top: 0;
+}
+
+.overview__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 5rem 0;
+}
+
+.overview__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.overview__tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.overview__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.overview__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  select {
+    width: auto;
+    min-width: 10rem;
+    margin-bottom: 0;
+  }
+}
+
+.overview__count {
+  margin-left: auto;
+  margin-bottom: 0.5rem;
+}
+
+// Sticks to the top of the scroll area so a selection made at the bottom of a long grid can still be
+// acted on without scrolling back up. Above the cards, below the sidebar's z-index of 100.
+.overview__bulk {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--vf-color-border-information);
+  background-color: var(--vf-color-background-information-default);
+
+  .team-member-select {
+    flex: 0 1 16rem;
+  }
+}
+
+/* ── Summary strip ── */
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1px;
+  margin-bottom: 1.5rem;
+  // A single background behind 1px grid gaps draws the dividers, so no tile needs its own border.
+  background-color: var(--vf-color-border-low-contrast);
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.summary-strip__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--vf-color-background-default);
+  // A left accent keyed to the tile's tone, rather than a filled background, so five tiles side by
+  // side stay legible instead of turning into a block of colour.
+  border-left: 3px solid transparent;
+
+  &--positive { border-left-color: var(--vf-color-border-positive); }
+  &--caution  { border-left-color: var(--vf-color-border-caution); }
+  &--negative { border-left-color: var(--vf-color-border-negative); }
+  &--muted    { border-left-color: var(--vf-color-border-low-contrast); }
+}
+
+.summary-strip__value {
+  font-size: 1.75rem;
+  line-height: 1.1;
+  font-weight: 300;
+}
+
+.summary-strip__label {
+  font-size: 0.8125rem;
+  color: var(--vf-color-text-muted);
+}
+
+.summary-strip__hint {
+  font-size: 0.75rem;
+  color: var(--vf-color-text-muted);
+}
+
+/* ── Project grid ── */
+
+// Two columns from tablet, three once there is room for them. `auto-fill` with a minimum rather than a
+// fixed count, so the grid answers the window rather than a breakpoint guess.
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin-bottom: 0;
+  border: 1px solid var(--vf-color-border-low-contrast);
+  transition: border-color 0.1s, box-shadow 0.1s;
+
+  &:hover {
+    border-color: var(--vf-color-border-high-contrast);
+  }
+
+  &.is-selected {
+    border-color: var(--vf-color-border-information);
+    box-shadow: inset 3px 0 0 var(--vf-color-border-information);
+  }
+
+  &--overdue {
+    border-left: 3px solid var(--vf-color-border-negative);
+  }
+}
+
+.project-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.project-card__select {
+  flex-shrink: 0;
+  // Vanilla's checkbox label carries the click target and its own top padding; zero it so the box
+  // lines up with the filename rather than sitting a line below it.
+  padding-top: 0;
+  min-height: 0;
+
+  .p-checkbox__label {
+    padding-top: 0;
+    min-height: 1rem;
+  }
+}
+
+.project-card__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.project-card__filename {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 550;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.project-card__uploader {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card__status {
+  flex-shrink: 0;
+}
+
+.project-card__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.project-card__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.project-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.project-card__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+// The Team select's trigger and the Due button, sized and shaped as one control type.
+//
+// Both are Vanilla base buttons, so this only has to pin what Vanilla leaves to the content: a fixed
+// box, square corners to match the rest of the app's compact controls, and Vanilla's 1rem horizontal
+// padding cut to 0.5rem — at 2rem it left too little of an 8.5rem box for the avatars or a date.
+// `overflow: hidden` is the guarantee that neither can ever push the row around, whatever it holds.
+//
+// The date input is in the list too, so switching the Due field into edit mode swaps one control for
+// another of exactly the same size instead of making the row jump.
+.team-member-select--compact .team-member-select__trigger,
+.due-date-field,
+.due-date-field__input {
+  box-sizing: border-box;
+  width: $card-field-width;
+  height: $card-field-height;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 0 0.5rem;
+  border-radius: 0;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  font-size: 0.875rem;
+  overflow: hidden;
+}
+
+// "Team" and "Due", each sitting beside its own control. The shared `span.p-text--small` reset above is
+// what lets `align-items: center` on the row actually centre these against their buttons; `line-height`
+// matches the avatar height so the text sits on the control's centre line rather than near it.
+.project-card__row-label {
+  display: inline-flex;
+  align-items: center;
+  // Both labels are plain text with nothing before them, so they share a left edge in this column.
+  justify-content: flex-start;
+  flex-shrink: 0;
+  width: 4rem;
+  // Matched to the control beside it, so "Team" and "Due" sit on exactly their button's centre line
+  // rather than near it.
+  height: $card-field-height;
+  line-height: $card-field-height;
+  // Heavier than the body text around it, so each reads as a field name rather than as prose.
+  font-weight: 550;
+}
+
+.project-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+/* ── Overlapping avatar stack ── */
+
+.member-stack {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+// Each avatar laps the one before it, so a team of six costs about the width of three.
+.member-stack__item {
+  display: inline-flex;
+  margin-right: -0.375rem;
+  border-radius: 50%;
+  // Rings each avatar in the card colour so overlapping edges stay distinguishable.
+  box-shadow: 0 0 0 2px var(--vf-color-background-default);
+
+  &:last-child {
+    margin-right: 0;
+  }
+}
+
+// The last circle in the stack, not a chip beside it: same 1.25rem round footprint as a
+// `--small` avatar, the same ring, and no left margin so it laps the avatar before it exactly as the
+// avatars lap each other. Square and detached, it read as a separate control rather than as the
+// remainder of the row of faces.
+//
+// Fixed width rather than `min-width`, so "+2" and "+12" occupy the same space and the stack's total
+// width does not depend on how many members happen to be hidden.
+.member-stack__overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 50%;
+  // Small enough for "+12" to fit inside a 20px circle without padding.
+  font-size: 0.625rem;
+  line-height: 1;
+  background-color: var(--vf-color-background-alt);
+  border: 1px solid var(--vf-color-border-high-contrast);
+  box-shadow: 0 0 0 2px var(--vf-color-background-default);
+}
+
+// The compact wrapper, for the grid of project cards. Its trigger is sized alongside the Due button in
+// the shared card-field rule above; what is left here is the wrapper itself, which the base
+// `.team-member-select` declares as `flex: 1 1 12rem` and which therefore stretches and shrinks with
+// whatever sits beside it.
+.team-member-select--compact {
+  flex: 0 0 auto;
+
+  // Avatars must hold their size inside a fixed box rather than being squeezed to fit.
+  .member-stack {
+    flex-shrink: 0;
+  }
+
+  // "Assign" centred in the box. Two defaults have to be undone for it: the label is `flex: 1 1 auto`,
+  // so it would absorb all the free space and leave `justify-content` nothing to centre, and the chevron
+  // is pushed right by `margin-left: auto`, which would hold the pair apart at opposite ends. With both
+  // released, the word and its chevron centre together as one group.
+  .team-member-select__trigger.is-empty {
+    justify-content: center;
+
+    .team-member-select__trigger-label {
+      flex: 0 1 auto;
+    }
+
+    i {
+      margin-left: 0.25rem;
+    }
+  }
+}
+
+/* ── Progress wheel ── */
+
+.progress-wheel {
+  position: relative;
+  flex-shrink: 0;
+}
+
+// One track per ring, and the hover target for that ring — a status sitting at 0% has no arc to point
+// at, so the track is what stays pointable. Tinted towards its own status rather than left neutral, so
+// three concentric rings still read as three different things when all three are nearly empty.
+.progress-wheel__track {
+  stroke: var(--vf-color-border-low-contrast);
+  cursor: pointer;
+  opacity: 0.35;
+
+  &--approved   { stroke: var(--vf-color-border-positive); }
+  &--ready      { stroke: var(--vf-color-border-information); }
+  &--unanswered { stroke: var(--vf-color-border-negative); }
+}
+
+.progress-wheel__band {
+  // Butt caps, not round: a round cap overhangs the arc's own end by half the stroke width, which on a
+  // near-empty ring is most of what you see and makes 2% look like 8%.
+  stroke-linecap: butt;
+  // The track underneath carries the hover, so this must not intercept it.
+  pointer-events: none;
+  transition: opacity 0.1s;
+
+  &.is-hovered {
+    opacity: 0.75;
+  }
+
+  &--approved   { stroke: var(--vf-color-border-positive); }
+  &--ready      { stroke: var(--vf-color-border-information); }
+  &--unanswered { stroke: var(--vf-color-border-negative); }
+}
+
+// Sized to the innermost ring's clear space and centred over the wheel, so the readout never overlaps a
+// ring. Absolute centring by translate rather than `inset: 0`, because the box is smaller than the SVG.
+.progress-wheel__center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.0625rem;
+  // The rings beneath must stay hoverable through the middle of the wheel.
+  pointer-events: none;
+  text-align: center;
+  overflow: hidden;
+}
+
+.progress-wheel__value {
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 300;
+}
+
+// No letter-spacing and no nowrap: the readout is only as wide as the innermost ring's clear space, so
+// "Unanswered" needs every pixel and must be allowed to wrap rather than be clipped.
+.progress-wheel__label {
+  font-size: 0.5625rem;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--vf-color-text-muted);
+}
+
+.progress-wheel__tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  pointer-events: none;
+  color: var(--vf-color-background-default);
+  background-color: var(--vf-color-text-default);
+}
+
+/* ── Due date ── */
+
+.due-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  // The date sits left, against the icon, rather than centred: a centred string of varying length looks
+  // like it is moving each time the date changes, even inside a box that is not.
+  justify-content: flex-start;
+  text-align: left;
+
+  i {
+    flex-shrink: 0;
+  }
+
+  // "Set date" centred in the box, icon and all, rather than hugging the left edge of an otherwise
+  // empty button. `__value` does not grow, so centring the row is all this takes.
+  &--empty {
+    justify-content: center;
+  }
+
+  // Red text and a red border, which with the card's own overdue accent and its "Overdue" status badge
+  // is enough — this is where the inline "Overdue" chip used to be, and it did not fit.
+  &--overdue {
+    color: var(--vf-color-border-negative);
+    border-color: var(--vf-color-border-negative);
+  }
+}
+
+// Clipped rather than allowed to widen the button. A locale that formats longer than the box loses its
+// tail instead of breaking the row, and the button's `title` and `aria-label` carry the full date.
+.due-date-field__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Completed & exported list ── */
+
+.completed-list {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.completed-list__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.completed-list__count {
+  padding: 0 0.375rem;
+  background-color: var(--vf-color-background-alt);
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.completed-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.completed-row__icon {
+  flex-shrink: 0;
+}
+
+.completed-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Fixed columns so the rows read as a table rather than as ragged text, without the markup of one.
+.completed-row__meta {
+  flex-shrink: 0;
+  width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+}
+
+.completed-row__action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ── My assignments ── */
+
+.my-assignments__summary {
+  margin-bottom: 0.75rem;
+}
+
+.my-assignments__empty {
+  padding: 3rem 0;
+  text-align: center;
+}
+
+.my-assignments__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.my-assignments__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.my-assignments__link {
+  font-weight: 550;
+  text-align: left;
+}
+
+.my-assignments__detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* ── Approval row on a question card ── */
+
+.question-card__approval {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+// The multi-select marks chosen members with a tick; tint the row too so a long team list can be
+// scanned without reading every icon.
+.team-member-select__option.is-selected {
+  background-color: var(--vf-color-background-information-default);
 }

@@ -1,4 +1,4 @@
-import { ref, get, set, remove, onValue, off } from 'firebase/database';
+import { ref, get, set, remove, onValue } from 'firebase/database';
 import { db } from './firebase';
 import type { TeamMember } from './types';
 
@@ -11,7 +11,11 @@ export function subscribeToTeamMembers(
   onUpdate: (members: TeamMember[]) => void
 ): () => void {
   const teamRef = ref(db, 'teamMembers');
-  onValue(teamRef, (snapshot) => {
+  // Returns onValue's own unsubscribe, which detaches exactly this callback. The previous
+  // `off(teamRef)` detached every listener registered at the path, so two overlapping subscriptions
+  // would take each other down and leave the team list frozen. Same fix as `subscribeToSession` and
+  // `subscribeToSavedFiles`.
+  return onValue(teamRef, (snapshot) => {
     const val = snapshot.val();
     const members: TeamMember[] = val
       ? Object.entries(
@@ -27,7 +31,6 @@ export function subscribeToTeamMembers(
       : [];
     onUpdate(members);
   });
-  return () => off(teamRef);
 }
 
 interface EnsureTeamMemberInput {

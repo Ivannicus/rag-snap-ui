@@ -14,11 +14,11 @@ RAG Snap UI is a Next.js application for reviewing AI-generated RFP (Request for
 - **Q&A Inspector** — load a JSON results file, browse questions grouped by section, filter by status/section/assignee/reviewer, and full-text search across questions and answers.
 - **Inline editing** — edit any answer in place; edited answers can always be re-edited later.
 - **Star ratings** — rate answers 1–5 stars. Disabled for unanswered questions unless they've been edited.
-- **Context URLs** — attach a source URL to unanswered questions to help track down supporting context.
 - **Saved files, shared across the team** — uploaded files are written to Firebase so any signed-in teammate can reopen the same file from the "Load a JSON file" dropdown, without re-uploading it themselves.
 - **Team bank** — a shared roster of `@canonical.com` users, auto-populated the first time each person signs in (no manual setup required).
-- **Assignee & reviewer assignment** — assign a question to one team member to answer and another to review, picked from avatar dropdowns populated from the team bank.
-- **Live session sharing** — generate a shareable link that syncs edits, ratings, context URLs, and assignments to collaborators in real time via Firebase Realtime Database.
+- **Assignee & reviewer assignment** — assign a whole section to one team member to answer and another to review, picked from avatar dropdowns populated from the team bank. Sections are the unit of assignment; individual questions are not assigned separately.
+- **Reviewer-gated approval** — only the team member set as a section's reviewer can approve the questions in that section, and a section with no reviewer yet cannot be approved by anyone. Withdrawing an approval is deliberately open to everyone, so a stale sign-off never waits on one person. This is a UI restriction; the database rules do not enforce it.
+- **Live session sharing** — generate a shareable link that syncs edits, ratings, approvals, and assignments to collaborators in real time via Firebase Realtime Database.
 - **RFP Database search** — a separate view for full-text searching a shared archive of previously answered RFP questions, imported from a Google Sheets export (see [scripts/README.md](scripts/README.md)).
 - **CSV export** — export the current file's results (including edits, ratings, and context URLs) as a CSV.
 
@@ -92,8 +92,8 @@ components/
   Header.tsx             # Sticky header: logo, dark mode toggle, FileLoader, view switcher, Manage Users panel
   FileLoader.tsx         # Drag-and-drop / click-to-upload JSON loader, saved-files dropdown
   FilterBar.tsx          # Status toggle, section/assignee/reviewer filter dropdown, search
-  SectionGroup.tsx       # Renders one section's questions, plus assignee/reviewer indicator
-  QuestionCard.tsx       # One question: edit, rate, copy, context URL
+  SectionGroup.tsx       # One section: its assignee/reviewer pickers, counts, and question cards
+  QuestionCard.tsx       # One question: edit, rate, copy, approve
   TeamMemberSelect.tsx   # Assignee/reviewer avatar dropdown picker
   TeamMemberAvatar.tsx   # Avatar (photo or initials) for a team member
   ShareButton.tsx        # Creates a live Firebase session, copies the share URL
@@ -124,7 +124,7 @@ The Realtime Database is organized into four top-level paths, each restricted (r
 
 | Path | Purpose |
 |---|---|
-| `/sessions/<sessionId>` | A shared, live-synced review session: the loaded file plus `editedAnswers`, `ratings`, `contextUrls`, `assignees`, and `reviewers` maps. |
+| `/sessions/<sessionId>` | A shared, live-synced review session: the loaded file plus `editedAnswers`, `ratings`, `itemStatus`, `sectionAssignees`, `sectionReviewers` and `projectAssignees` maps. Also a read-only `contextUrls` map, kept for URLs attached before that feature was removed. |
 | `/teamMembers/<memberId>` | The shared org-wide roster of `{ name, email, photoURL, createdAt }`, auto-populated on first sign-in. |
 | `/savedFiles/<fileId>` | JSON result files uploaded by any teammate, so others can reopen them without re-uploading. |
 | `/rfpDatabase/<recordId>` | The searchable archive of previously answered RFP questions, populated by `scripts/import-rfp-data.ts`. |

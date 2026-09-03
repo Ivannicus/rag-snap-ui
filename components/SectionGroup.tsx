@@ -1,9 +1,9 @@
 "use client";
 
 import QuestionCard from "./QuestionCard";
-import TeamMemberAvatar from "./TeamMemberAvatar";
+import TeamMemberSelect from "./TeamMemberSelect";
 import { isUnanswered } from "@/lib/utils";
-import type { QAItem, TeamMember } from "@/lib/types";
+import type { ItemStatus, QAItem, TeamMember } from "@/lib/types";
 
 interface Props {
   section: string;
@@ -15,15 +15,21 @@ interface Props {
   ratings: Record<string, number>;
   onSaveRating: (id: string, rating: number) => void;
   onClearRating: (id: string) => void;
+  /** Read-only now: passed down for the badge on cards that already have a URL. */
   contextUrls: Record<string, string>;
-  onSaveContextUrl: (id: string, url: string) => void;
-  onClearContextUrl: (id: string) => void;
-  assignees: Record<string, string>;
-  onSaveAssignee: (id: string, memberId: string) => void;
-  onClearAssignee: (id: string) => void;
-  reviewers: Record<string, string>;
-  onSaveReviewer: (id: string, memberId: string) => void;
-  onClearReviewer: (id: string) => void;
+  itemStatus: Record<string, ItemStatus>;
+  onApprove: (id: string) => void;
+  onUnapprove: (id: string) => void;
+  /** TeamMember.id owning this whole section, from `sectionAssignees`. */
+  sectionAssignee?: string;
+  onSaveSectionAssignee: (sectionKey: string, memberId: string) => void;
+  onClearSectionAssignee: (sectionKey: string) => void;
+  /** TeamMember.id reviewing this whole section, from `sectionReviewers`. */
+  sectionReviewer?: string;
+  onSaveSectionReviewer: (sectionKey: string, memberId: string) => void;
+  onClearSectionReviewer: (sectionKey: string) => void;
+  /** The signed-in user's TeamMember.id, or undefined if they are not in the bank. */
+  myMemberId?: string;
   teamMembers: TeamMember[];
 }
 
@@ -38,27 +44,46 @@ export default function SectionGroup({
   onSaveRating,
   onClearRating,
   contextUrls,
-  onSaveContextUrl,
-  onClearContextUrl,
-  assignees,
-  onSaveAssignee,
-  onClearAssignee,
-  reviewers,
-  onSaveReviewer,
-  onClearReviewer,
+  itemStatus,
+  onApprove,
+  onUnapprove,
+  sectionAssignee,
+  onSaveSectionAssignee,
+  onClearSectionAssignee,
+  sectionReviewer,
+  onSaveSectionReviewer,
+  onClearSectionReviewer,
+  myMemberId,
   teamMembers,
 }: Props) {
+  // The same three disjoint buckets the dashboard counts, over this section's items. Approval wins
+  // over the original answer, so an approved item is never also counted as unanswered.
+  const approvedCount = items.filter((i) => itemStatus[i.id] === "approved").length;
   const unansweredCount = items.filter(
-    (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
+    (i) => itemStatus[i.id] !== "approved" && isUnanswered(i.answer) && !editedAnswers[i.id]
   ).length;
-  const answeredCount = items.length - unansweredCount;
+  const readyCount = items.length - approvedCount - unansweredCount;
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
-  const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
-  const assigneeMember = teamMembers.find((m) => m.id === assigneeId);
-
-  const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
-  const reviewerMember = teamMembers.find((m) => m.id === reviewerId);
+  /**
+   * Why the signed-in user may not approve in this section, or undefined when they may.
+   *
+   * Decided here rather than in `QuestionCard` because the reviewer is a property of the section, not
+   * of a question — every card in the section gets the same answer, and the card would otherwise need
+   * `teamMembers` back just to turn an id into a name.
+   *
+   * An unreviewed section is closed, not open: with nobody named as reviewer there is nobody whose
+   * sign-off it would be. Withdrawing is deliberately *not* gated — see the approval row in
+   * `QuestionCard` — so a stale approval never waits on one person.
+   */
+  const reviewer = sectionReviewer
+    ? teamMembers.find((m) => m.id === sectionReviewer)
+    : undefined;
+  const approveDisabledReason = !sectionReviewer
+    ? `Section ${section} has no reviewer yet. Approval is the reviewer's to give, so assign one above first.`
+    : sectionReviewer !== myMemberId
+    ? `Only ${reviewer?.name ?? "this section's reviewer"} can approve section ${section}.`
+    : undefined;
 
   return (
     <div>
@@ -67,42 +92,49 @@ export default function SectionGroup({
         <span className="p-heading--5 u-no-margin--bottom">
           Section {section}
         </span>
-        <span className="section-header__block">
+        {/* A real section-level owner, stored under `sectionAssignees`. This used to show the assignee
+            of the section's *first item*, which read as a section owner but was not one: assigning it
+            was impossible, and it changed whenever question one changed hands. */}
+        <span className="section-header__block section-header__block--select">
           Assignee:
-          <span className="section-header__assignment">
-            {assigneeMember ? (
-              <>
-                <TeamMemberAvatar member={assigneeMember} size="small" />
-                {assigneeMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
+          {/* The trigger shows the chosen member itself, so there is no second badge with the same
+              avatar and name beside it. */}
+          <TeamMemberSelect
+            label=""
+            value={sectionAssignee}
+            teamMembers={teamMembers}
+            onSelect={(memberId) => onSaveSectionAssignee(section, memberId)}
+            onClear={() => onClearSectionAssignee(section)}
+          />
         </span>
-        <span className="section-header__block">
+        {/* A real section-level reviewer, stored under `sectionReviewers`. Like the assignee beside it
+            this used to be read-only text taken from the section's *first item*, so the section could
+            not be given a reviewer at all and the one shown changed whenever question one did. */}
+        <span className="section-header__block section-header__block--select">
           Reviewer:
-          <span className="section-header__assignment">
-            {reviewerMember ? (
-              <>
-                <TeamMemberAvatar member={reviewerMember} size="small" />
-                {reviewerMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
+          <TeamMemberSelect
+            label=""
+            value={sectionReviewer}
+            teamMembers={teamMembers}
+            onSelect={(memberId) => onSaveSectionReviewer(section, memberId)}
+            onClear={() => onClearSectionReviewer(section)}
+          />
         </span>
         <span className="section-header__block">
           {items.length} {items.length === 1 ? "Question" : "Questions"}
         </span>
-        {answeredCount > 0 && (
-          <span className="section-header__block section-header__block--positive">
-            {answeredCount} Answered
+        {approvedCount > 0 && (
+          <span className="section-header__block section-header__block--band-approved">
+            {approvedCount} Approved
+          </span>
+        )}
+        {readyCount > 0 && (
+          <span className="section-header__block section-header__block--band-ready">
+            {readyCount} Ready
           </span>
         )}
         {unansweredCount > 0 && (
-          <span className="section-header__block section-header__block--negative">
+          <span className="section-header__block section-header__block--band-unanswered">
             {unansweredCount} Unanswered
           </span>
         )}
@@ -128,15 +160,10 @@ export default function SectionGroup({
             onSaveRating={onSaveRating}
             onClearRating={onClearRating}
             contextUrl={contextUrls[item.id]}
-            onSaveContextUrl={onSaveContextUrl}
-            onClearContextUrl={onClearContextUrl}
-            assignee={assignees[item.id]}
-            onSaveAssignee={onSaveAssignee}
-            onClearAssignee={onClearAssignee}
-            reviewer={reviewers[item.id]}
-            onSaveReviewer={onSaveReviewer}
-            onClearReviewer={onClearReviewer}
-            teamMembers={teamMembers}
+            approved={itemStatus[item.id] === "approved"}
+            approveDisabledReason={approveDisabledReason}
+            onApprove={onApprove}
+            onUnapprove={onUnapprove}
           />
         ))}
       </div>
