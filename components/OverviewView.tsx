@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ProjectCard from "./ProjectCard";
+import ProjectListRow from "./ProjectListRow";
 import ProjectSummaryStrip from "./ProjectSummaryStrip";
 import CompletedProjectsList from "./CompletedProjectsList";
 import MyAssignments from "./MyAssignments";
@@ -11,6 +12,7 @@ import { listArchivedProjects } from "@/lib/archive";
 import { setProjectAssignees } from "@/lib/session";
 import {
   EMPTY_OVERLAYS,
+  STATUS_BANDS,
   computeProjectStats,
   isOverdue,
   ownerIdsOf,
@@ -28,6 +30,10 @@ import type {
 type SortKey = "dueDate" | "progress" | "filename" | "uploadedAt";
 type StatusFilter = "all" | "in-progress" | "complete" | "overdue";
 type Tab = "projects" | "mine";
+/** Cards show a project's full detail; the list trades that for rows that compare down a column. */
+type ViewMode = "cards" | "list";
+
+const VIEW_MODE_KEY = "overviewViewMode";
 
 interface Props {
   teamMembers: TeamMember[];
@@ -60,10 +66,25 @@ export default function OverviewView({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>("projects");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [sortKey, setSortKey] = useState<SortKey>("dueDate");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // ── View mode ──
+  //
+  // Read after mount rather than in the initial state, because `output: 'export'` prerenders this and
+  // an initial value taken from `localStorage` would not match the prerendered HTML. Same reason
+  // `AppShell` loads the dark-mode preference in an effect.
+  useEffect(() => {
+    if (localStorage.getItem(VIEW_MODE_KEY) === "list") setViewMode("list");
+  }, []);
+
+  const changeViewMode = useCallback((next: ViewMode) => {
+    setViewMode(next);
+    localStorage.setItem(VIEW_MODE_KEY, next);
+  }, []);
 
   // ── Project list and archive: one-shot, re-read whenever the dashboard is shown ──
   useEffect(() => {
@@ -375,9 +396,44 @@ export default function OverviewView({
               </select>
             </label>
 
+            {/* Pushed to the right by `.overview__count`'s auto margin, so the two read as one
+                right-hand group: what is being shown, and how. */}
             <span className="u-text--muted p-text--small overview__count">
               Showing {visibleProjects.length} of {projects.length}
             </span>
+
+            <div className="overview__control">
+              <span className="u-text--muted p-text--small">View</span>
+              {/* Vanilla's segmented control: square-cornered and joined by design, which is what a
+                  two-way view choice should look like next to three selects. It ships no active-state
+                  styling of its own, so the pressed button carries `p-button--brand` — the same
+                  brand/base pairing the tabs above use. Its own `border-radius: 0` is set at
+                  specificity 0,2,0 and so survives the button class. */}
+              <div className="p-segmented-control is-dense overview__view-toggle">
+                <div className="p-segmented-control__list" role="group" aria-label="Project view">
+                  {([
+                    { mode: "cards", label: "Cards", icon: "p-icon--switcher-dashboard" },
+                    { mode: "list", label: "List", icon: "p-icon--menu" },
+                  ] as const).map(({ mode, label, icon }) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => changeViewMode(mode)}
+                      aria-pressed={viewMode === mode}
+                      className={`p-segmented-control__button ${
+                        viewMode === mode ? "p-button--brand" : "p-button--base"
+                      }`}
+                    >
+                      <i
+                        className={`${icon}${viewMode === mode ? " is-light" : ""}`}
+                        aria-hidden
+                      ></i>{" "}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
           {effectiveSelection.length > 0 && (
@@ -425,6 +481,42 @@ export default function OverviewView({
               >
                 Clear filters
               </button>
+            </div>
+          ) : viewMode === "list" ? (
+            <div className="project-list">
+              {/* Column labels, on the same grid as the rows. The bar and the badge cluster are not
+                  self-describing the way a filename is, and this is the only place the list says what
+                  the coloured lengths mean. */}
+              {/* One cell per track of `.project-list__row`, including the three status bands, which
+                  each own a column so a band at zero leaves its slot empty rather than shifting the
+                  bands after it. Order follows `STATUS_BANDS`.
+
+                  Every title reads from the left edge of its own column, and so does the cell under it.
+                  What is anchored to the row's right edge is the group of columns, not the text inside
+                  them — that comes from the name being the only elastic track. */}
+              <div className="project-list__row project-list__head" aria-hidden>
+                <span></span>
+                <span className="u-text--muted p-text--small">Project</span>
+                <span className="u-text--muted p-text--small">Progress</span>
+                {STATUS_BANDS.map((band) => (
+                  <span key={band.key} className="u-text--muted p-text--small">
+                    {band.short}
+                  </span>
+                ))}
+                <span className="u-text--muted p-text--small">Team</span>
+              </div>
+              {visibleProjects.map((project) => (
+                <ProjectListRow
+                  key={project.meta.id}
+                  project={project}
+                  teamMembers={teamMembers}
+                  opening={openingProjectId === project.meta.id}
+                  selected={effectiveSelection.includes(project.meta.id)}
+                  onToggleSelected={toggleSelected}
+                  onOpen={onOpenProject}
+                  onChangeOwners={handleChangeOwners}
+                />
+              ))}
             </div>
           ) : (
             <div className="project-grid">

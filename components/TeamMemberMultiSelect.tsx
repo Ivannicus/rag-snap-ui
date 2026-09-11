@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import TeamMemberAvatar from "./TeamMemberAvatar";
+import { lockPageScroll } from "@/lib/scrollLock";
 import type { TeamMember } from "@/lib/types";
 
 interface Props {
@@ -84,6 +85,15 @@ export default function TeamMemberMultiSelect({
     }
     window.addEventListener("scroll", handleScroll, { capture: true, passive: true });
     return () => window.removeEventListener("scroll", handleScroll, true);
+  }, [open]);
+
+  // ...and while it is open, hold the page still, so the only thing a wheel can move is the member list.
+  // Without this, scrolling to the end of the list chained to the document, the page moved, and the
+  // effect above shut the panel mid-choice — worse here than in `TeamMemberSelect`, since picking a team
+  // of four is meant to be four clicks in one open panel. See `lockPageScroll`.
+  useEffect(() => {
+    if (!open) return;
+    return lockPageScroll();
   }, [open]);
 
   function handleToggleOpen(e: MouseEvent) {

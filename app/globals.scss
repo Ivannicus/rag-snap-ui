@@ -396,6 +396,12 @@
   white-space: nowrap;
 }
 
+// `overscroll-behavior: contain` is the half of the fix that lives in CSS. A wheel that reaches the end of
+// a scroll container chains to the next scrollable ancestor by default — here the document — so scrolling
+// to the last member scrolled the page, and the page's scroll event is what both selects use to close
+// themselves. Containing the overscroll keeps the wheel inside the list. `lockPageScroll` is the other
+// half: it holds the page still for as long as the panel is open, so a wheel anywhere else does nothing
+// either, and the page only comes back when the panel is dismissed.
 .team-member-select__panel {
   position: fixed;
   z-index: 20;
@@ -403,6 +409,7 @@
   max-height: 20rem;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .team-member-select__list {
@@ -1115,6 +1122,15 @@ $card-field-height: 1.75rem;
   margin-bottom: 0.5rem;
 }
 
+// The Cards/List toggle. Vanilla's segmented-control pattern happens to leave its buttons with no
+// bottom margin today, but `.overview__controls` is `align-items: flex-end` — one appearing would lift
+// the whole toggle off the baseline the three selects sit on. Pinned rather than trusted.
+//
+// Two classes deep so this beats `.p-button--brand`/`--base` on the same element (0,1,0).
+.overview__view-toggle .p-segmented-control__button {
+  margin-bottom: 0;
+}
+
 // Sticks to the top of the scroll area so a selection made at the bottom of a long grid can still be
 // acted on without scrolling back up. Above the cards, below the sidebar's z-index of 100.
 .overview__bulk {
@@ -1188,6 +1204,258 @@ $card-field-height: 1.75rem;
   grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
   gap: 1.25rem;
   align-items: start;
+}
+
+/* ── Project list view ── */
+
+// The alternative to the card grid: one line per project, so thirty of them can be read down a column.
+//
+// The grid template is on the *row*, not on this container, because each row needs its own border and
+// selected/overdue state and `display: contents` would throw both away. Repeating the template is what
+// makes the columns line up down the page; every column is therefore a fixed width, never `auto` or
+// `1fr`, which would size itself per row (or per viewport) and stagger the values.
+//
+// The widths live here as custom properties so the header row and the project rows read them from one
+// place, and so the narrow-screen block below can reuse them as flex bases. Each is sized to its own
+// longest plausible value — a three-digit count plus its word — not to a common width: the point of a
+// fixed track is that the column starts at the same x on every row, not that every column is equal.
+//
+// The name is the one elastic track, and the only one: it takes every spare pixel so the right-hand
+// group ends flush with the row's right edge instead of trailing off into dead space, and it is the
+// track whose content ellipses, so growth costs nothing. Column alignment down the page survives
+// because every *other* track is fixed — a second `1fr` anywhere would break it.
+.project-list {
+  --list-col-select: 1.25rem;
+  --list-col-name: minmax(18rem, 1fr);
+  --list-col-bar: 8rem;
+  // Sized for a badge at its widest, which is now every badge in the band: the count is padded to three
+  // digits, so `1 Ready` is exactly as wide as `129 Ready`.
+  //
+  // Each carries real headroom over the label it holds, deliberately. The badge's width comes from the
+  // font — a `3ch` digit box plus a word — while these are `rem`, so the two only agree by measurement,
+  // and a track that merely *just* fits at one font stack clips at the next. The slack costs nothing:
+  // the badge sits at the left of its cell and the name track absorbs whatever is left over.
+  //
+  // Each includes the badge's 1rem of extra right padding — change one and the other has to follow, or the
+  // padding comes straight back out of the label.
+  --list-col-approved: 8.5rem;
+  --list-col-ready: 7rem;
+  --list-col-unanswered: 9.5rem;
+  --list-col-team: 9rem;
+
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.project-list__row {
+  display: grid;
+  // checkbox | name | approved bar | approved | ready | unanswered | team
+  // The three badge tracks are in `STATUS_BANDS` order; `ProjectListRow` maps that array straight into
+  // them, so reordering the array means reordering these three (and the header row's labels) with it.
+  grid-template-columns:
+    var(--list-col-select)
+    var(--list-col-name)
+    var(--list-col-bar)
+    var(--list-col-approved)
+    var(--list-col-ready)
+    var(--list-col-unanswered)
+    var(--list-col-team);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid transparent;
+
+  & + & {
+    border-top: 1px solid var(--vf-color-border-low-contrast);
+  }
+
+  &:not(.project-list__head):hover {
+    background-color: var(--vf-color-background-hover);
+  }
+
+  &.is-selected {
+    background-color: var(--vf-color-background-information-default);
+    border-left-color: var(--vf-color-border-information);
+  }
+
+  // Loses to `.is-selected` on source order alone if both apply, which is the right way round: the
+  // selection is the thing the user just did.
+  &--overdue {
+    border-left-color: var(--vf-color-border-negative);
+  }
+}
+
+.project-list__head {
+  background-color: var(--vf-color-background-alt);
+  border-bottom: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.project-list__select {
+  padding-top: 0;
+  min-height: 0;
+
+  .p-checkbox__label {
+    padding-top: 0;
+    min-height: 1rem;
+  }
+}
+
+// Same treatment as the card's filename — a plain-text button that opens the project — but it also
+// carries the opening spinner, since a row has no space for a separate Open button.
+//
+// `min-width: 0` is what lets the button be narrower than its own text: a grid item's automatic minimum
+// size is its content, so without this the name would push past its track instead of ellipsing.
+.project-list__filename {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 550;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+}
+
+// The truncation has to be on a child, not on the button: `text-overflow` applies to a block container,
+// and the button is a flex container so it would clip without ever drawing an ellipsis. The spinner is
+// the button's other child, which is why it has to be a flex container in the first place.
+.project-list__filename-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// One badge per track, and the wrapper is rendered whether or not it holds a badge: a band at zero drops
+// its badge but keeps its column, so the counts that *are* there stay under their headings instead of
+// sliding left into the gap. Clipping rather than nowrapping past the track keeps a four-digit count from
+// reaching into the next column.
+//
+// Left-aligned inside the cell, under a left-aligned heading: the badge starts at its column's left edge
+// on every row, so a count that widens from `9` to `142` grows rightwards into the column's own slack
+// instead of shifting where the eye has to look. The *group* of columns is what hugs the row's right
+// edge, and that comes from the elastic name track, not from anything in here.
+.project-list__badge {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+
+  // The badge draws at its own size and is never squeezed into the cell. Without this it is a shrinkable
+  // flex item, so a track a shade too narrow does not overflow visibly — it silently compresses the badge
+  // and `white-space: nowrap` cuts the label off inside its own border. That failure looks like a styling
+  // bug rather than a width that needs 0.25rem more, which is exactly how it got missed once already.
+  > * {
+    flex: none;
+  }
+
+  // Trailing room after the label, so the badge is not read as ending at the word. It roughly matches the
+  // pad the three-digit count leaves in front of a one-digit number, which is what makes the tile look
+  // deliberately sized rather than merely too big for its text.
+  //
+  // Scoped to the list on purpose: `.section-header__block` is shared with the section headers, where the
+  // tighter symmetric padding is the right look. Two classes beat the one-class base rule on specificity.
+  .section-header__block {
+    padding-right: 1.5rem;
+  }
+}
+
+// A three-digit box for the count, so every badge in a band is one width whatever the number: `1 Ready`
+// and `129 Ready` draw identical tiles, with the slack falling *before* the digits rather than stretching
+// the badge. Without this the tile's width tracked the count and the labels staggered down the column.
+//
+// `ch` is the advance measure of `0`, so `3ch` is exactly three digits — and tabular figures are what
+// make that true of the other nine as well, `1` included. `min-width` rather than `width`: a fourth digit
+// should widen the badge, not spill out of a fixed box and collide with the label.
+//
+// The gap to the label is a margin, not a space in the markup. `.section-header__block` is an inline flex
+// container, and a whitespace-only run between two flex items is not rendered.
+.project-list__badge-count {
+  flex: none;
+  min-width: 3ch;
+  margin-right: 0.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── The approved bar ──
+//
+// One metric, unlike the wheel's three: filled length is what compares across rows. Coloured from the
+// same semantic variable as `.progress-wheel__band--approved`, so the two views agree on what approved
+// looks like in either theme.
+//
+// The track takes whatever `--list-col-bar` leaves after the percentage box and the gap — 5rem at the
+// default 8rem. A short bar still compares fine because every row's is the same length; length only has
+// to be readable as a fraction of the track, not as an absolute.
+.approved-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.approved-bar__track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 0.5rem;
+  background-color: var(--vf-color-border-low-contrast);
+  overflow: hidden;
+}
+
+.approved-bar__fill {
+  height: 100%;
+  background-color: var(--vf-color-border-positive);
+  transition: width 0.2s;
+}
+
+// Tabular figures and a fixed box, so the percentages align in their column and the bar beside them
+// does not change length as a project crosses from 9% to 10%.
+.approved-bar__value {
+  flex: 0 0 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// Below this the seven tracks no longer fit, so the row stops being a grid and wraps instead. Aligned
+// columns are the first thing to go: with the header hidden there is nothing left to align under, and an
+// empty badge slot would be spending width the row no longer has — so the badges collapse to their
+// content here and the zero-count ones disappear entirely. The row still keeps its identity as a row
+// rather than collapsing into a card, which is what the other view is for.
+@media (max-width: 60rem) {
+  .project-list__row {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .project-list__filename {
+    flex: 1 1 10rem;
+  }
+
+  .approved-bar {
+    flex: 0 0 var(--list-col-bar);
+  }
+
+  .project-list__badge {
+    flex: 0 0 auto;
+
+    &:empty {
+      display: none;
+    }
+  }
+
+  .project-list__head {
+    display: none;
+  }
 }
 
 .project-card {
