@@ -396,14 +396,14 @@ export default function OverviewView({
               </select>
             </label>
 
-            {/* Pushed to the right by `.overview__count`'s auto margin, so the two read as one
-                right-hand group: what is being shown, and how. */}
-            <span className="u-text--muted p-text--small overview__count">
-              Showing {visibleProjects.length} of {projects.length}
-            </span>
-
-            <div className="overview__control">
-              <span className="u-text--muted p-text--small">View</span>
+            {/* The count sits in the slot the "View" label used to hold: it says what is being shown,
+                directly over the control that decides how, so the label was saying nothing the two
+                buttons do not already say. `--view` carries the auto margin that used to be on
+                `.overview__count`, so the group still ends up hard right. */}
+            <div className="overview__control overview__control--view">
+              <span className="u-text--muted p-text--small overview__count">
+                Showing {visibleProjects.length} of {projects.length}
+              </span>
               {/* Vanilla's segmented control: square-cornered and joined by design, which is what a
                   two-way view choice should look like next to three selects. It ships no active-state
                   styling of its own, so the pressed button carries `p-button--brand` — the same
@@ -424,10 +424,14 @@ export default function OverviewView({
                         viewMode === mode ? "p-button--brand" : "p-button--base"
                       }`}
                     >
+                      {/* No space between the two: the gap is a margin on the icon, because Vanilla
+                          gives an icon that is a button's only element child a *negative* right margin
+                          (`:last-child` in `%vf-button-has-icon`) which ate a space in the markup and
+                          pulled the label onto the icon. See `.overview__view-toggle`. */}
                       <i
                         className={`${icon}${viewMode === mode ? " is-light" : ""}`}
                         aria-hidden
-                      ></i>{" "}
+                      ></i>
                       {label}
                     </button>
                   ))}

@@ -1,6 +1,27 @@
+@use "sass:color";
 @use "vanilla-framework";
 
 @include vanilla-framework.vanilla;
+
+// The four-square dashboard glyph on the Cards half of the view toggle, matching the icon beside
+// Overview in the sidebar. Opted in by hand because `vanilla` compiles only its core icon set — the
+// class was already on the button and silently drew nothing, an empty box that still claimed an icon's
+// margins. Included as Vanilla's own mixin rather than inlined as an SVG so it is a real `p-icon--*`:
+// that is what gives it the same box, baseline nudge, `is-light` white variant and margins as
+// `p-icon--menu` on the List half, instead of a second set of values to keep in step by hand.
+@include vanilla-framework.vf-p-icon-switcher-dashboard;
+
+// ...and its white variant in dark mode, which Vanilla will not give it here. This icon is one of the
+// older ones, drawn by a single `background-image` plus an explicit list of dark-theme selectors —
+// `[class*='--dark'] &`, `body.is-dark &`, `&.is-light`, `&.is-dark` — where the newer ones (`p-icon--menu`
+// on the List half among them) hold both colours at once behind `--vf-theme-light` / `--vf-theme-dark`
+// and so follow the flags a bare `.is-dark` sets. This app marks dark mode on `<html>`, not `<body>`
+// (`AppShell`), so `body.is-dark &` never matched and the icon stayed black on a dark button while the
+// one beside it went white. Restated for whichever element carries the class, through Vanilla's own
+// definition mixin so the glyph is not copied.
+.is-dark .p-icon--switcher-dashboard {
+  @include vanilla-framework.vf-icon-switcher-dashboard(vanilla-framework.$colors--dark-theme--icon);
+}
 
 .login-screen {
   min-height: 100vh;
@@ -419,6 +440,16 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+// A sentence, not an option: it says why the list above it is empty and where the fix lives. Block, so
+// it wraps inside the panel's 16rem instead of becoming a single flex line, and its own font size rather
+// than `p-text--small`, which carries a bottom margin that would leave dead space at the panel's foot.
+.team-member-select__empty {
+  display: block;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
 .team-member-select__option {
@@ -1117,18 +1148,81 @@ $card-field-height: 1.75rem;
   }
 }
 
-.overview__count {
+// The right-hand end of the control row: the count captioning the Cards/List toggle. The auto margin
+// is what pushes the pair away from the three selects, and it lives here rather than on the count
+// because the count is now a child rather than a sibling of them.
+.overview__control--view {
   margin-left: auto;
-  margin-bottom: 0.5rem;
+}
+
+// Centred over the toggle, and centred by `text-align` rather than by `align-items: center` on the
+// column: stretched to the column's full width the caption is exactly as wide as the toggle below it,
+// so the two stay centred on each other even if the count outgrows the buttons. Its old
+// `margin-bottom: 0.5rem` is gone with the auto margin: that pair lifted it off the row's `flex-end`
+// baseline back when it was a sibling of the three selects, and as a caption inside the column it wants
+// the same `p-text--small` margin the "Sort by" / "Owner" / "Status" labels carry instead.
+.overview__count {
+  text-align: center;
 }
 
 // The Cards/List toggle. Vanilla's segmented-control pattern happens to leave its buttons with no
 // bottom margin today, but `.overview__controls` is `align-items: flex-end` — one appearing would lift
 // the whole toggle off the baseline the three selects sit on. Pinned rather than trusted.
 //
+// Two thirds of the 22rem it was first widened to, as requested — still wider than the two labels ask
+// for, so there is room for the icons to sit clear of them. The width goes on the control and the
+// buttons take equal shares of it (`flex: 1 1 0`, the list being `display: flex`) rather than each
+// growing by its own content: sized by content, "Cards" is the wider half and the join between them
+// sits off-centre under the caption. Vanilla's own `text-align: center` then centres each label in its
+// half — the buttons are `inline-block`, not flex containers, so `justify-content` would do nothing.
+.overview__view-toggle {
+  width: 14.75rem;
+  max-width: 100%;
+}
+
 // Two classes deep so this beats `.p-button--brand`/`--base` on the same element (0,1,0).
 .overview__view-toggle .p-segmented-control__button {
+  flex: 1 1 0;
   margin-bottom: 0;
+
+  // Orange on both halves, so the unselected one has a visible outline. `.p-button--base` sets every
+  // one of its border colours to `transparent` — that is why only the pressed button had an edge — and
+  // it sets them per state, including `[aria-pressed='true']` (0,2,0), which the buttons here carry. So
+  // the states are restated rather than left to the one declaration above, which would only tie with
+  // those on specificity and win on source order alone.
+  //
+  // The exact fill of the selected half, not merely an orange: `p-button--brand` plus the button's own
+  // `aria-pressed="true"` resolves to Vanilla's *active* brand, so the value is computed here the same
+  // way `%p-button--brand-light` computes it rather than pinned to a literal that would drift if the
+  // theme moved. `$color-brand-dark` is `$color-brand`, so one value covers `is-dark` too — which is why
+  // this can be a build-time colour where `--vf-color-border-caution` had to be a themed custom
+  // property.
+  &,
+  &:hover,
+  &:active,
+  &[aria-pressed="true"] {
+    // `-namespace.$var` does not parse — Sass reads the minus as part of the namespace — hence `* -1`.
+    border-color: color.adjust(
+      vanilla-framework.$color-brand,
+      $lightness: vanilla-framework.$active-background-opacity-percentage * -1
+    );
+  }
+
+  // The gap between an icon and its label. Vanilla's `%vf-button-has-icon` gives an icon $sph--small of
+  // margin on both sides, then cancels it again on `:first-child` and `:last-child` — and the icon here
+  // is the button's *only* element child, so it is both, and a space in the markup disappeared into that
+  // negative right margin. Pseudo-classes bring these to 0,4,0, over Vanilla's own 0,3,0. The left one
+  // goes to zero rather than staying negative because the pair is centred in a button wider than it:
+  // a negative outer margin shifts the visible group off the centre the browser measured.
+  [class*="p-icon"] {
+    &:first-child {
+      margin-left: 0;
+    }
+
+    &:last-child {
+      margin-right: 0.5rem;
+    }
+  }
 }
 
 // Sticks to the top of the scroll area so a selection made at the bottom of a long grid can still be

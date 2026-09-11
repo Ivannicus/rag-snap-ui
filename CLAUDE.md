@@ -57,6 +57,8 @@ library:
 - `contextUrls: Record<string, string>` — `item.id → URL`; **read-only, no writer** (see below)
 - `itemStatus: Record<string, ItemStatus>` — `item.id → "approved"`
 - `sectionAssignees` / `sectionReviewers: Record<string, string>` — section key → `TeamMember.id`
+- `projectAssignees: Record<string, true>` — the open project's owners; **read here, never written here**
+  (the dashboard owns the writer). The inspector needs it because owners gate who a section may name
 - `teamMembers: TeamMember[]` — the global team bank (not part of `SessionState`)
 - `filters: Filters`, `darkMode: boolean` (persisted to `localStorage`)
 - `docId: string | null` — the open project; **also its session id** (see below)
@@ -84,6 +86,14 @@ the room via `runTransaction` (idempotent, and safe when two people open a proje
 Sharing is a URL: `?doc=<id>`. `AppShell` reads it on mount and fetches the document from
 `savedFiles/<id>` rather than waiting on a room snapshot, so a link works even for a project whose room
 was never seeded.
+
+**`handleLoad` clears the overlays only when the doc id actually changes** (`docIdRef.current !==
+loadedDocId`), and that guard is load-bearing. `setDocId` bails out on an unchanged value, so the
+subscription effect does not re-run, and `onValue` has already delivered its initial snapshot and has no
+*change* to re-send — nothing would refill what was cleared. Re-opening the doc already on screen (what
+clicking it on the dashboard does) therefore used to blank owners, approvals and section assignees until
+somebody else happened to write something. The overlays on screen already belong to that doc, so a
+re-open has nothing to clear.
 
 RTDB forbids `.` in keys, so item ids like `"1.1"` are stored encoded. **`encodeKey`/`decodeKey` are
 exported from `lib/session.ts` — use them. Do not hand-roll a second codec.** Section keys derive from
@@ -271,9 +281,37 @@ consuming it. Do not add a new writer without being asked — removing the input
 - `sessions/<id>/sectionAssignees` — per section, who answers it; self-serve or lead-assigned
 - `sessions/<id>/sectionReviewers` — per section, who reviews it; independent of who answers
 - `sessions/<id>/projectAssignees` — `{ TeamMember.id: true }`, the project's owners, multi-owner,
-  lead-assigned, **no cascade to sections**
+  lead-assigned, **no cascade to sections** — but they *gate* who the sections may name (below)
 
 The section pair are single values, **not** fan-out writes to every item in the section.
+
+**A project's owners are the only people its sections may be handed to.** `AppShell`'s
+`assignableMembers` memo filters the team bank down to `projectAssignees`, and that — not the bank — is
+what the two `TeamMemberSelect`s in `SectionGroup` offer. Work flows through the project, not around it:
+a section naming somebody who is not on the project at all used to be possible and said nothing about
+which of the two was wrong.
+
+Three consequences, each deliberate:
+
+- **An unowned project has nobody to give its sections to.** The list is empty and a hint points at the
+  Overview dashboard (`emptyHint` on `TeamMemberSelect`). This is the same shape as the reviewer gate —
+  an unstaffed project is closed, not open — and it does mean every project predating this rule is
+  unassignable until a lead sets its owners. Falling back to the whole bank would undo the restriction on
+  exactly the projects nobody has staffed.
+- **`SectionGroup` still receives the full `teamMembers` bank alongside `assignableMembers`**, because
+  `approveDisabledReason` has to turn `sectionReviewers[section]` into a name even when that person is no
+  longer an owner. Filtering the one prop instead of adding a second would have left that message saying
+  "this section's reviewer".
+- **Removing an owner does not clear their section assignments**, and `optionsFor` in `SectionGroup`
+  unions the offered list with whoever the field currently names. That is not a loophole — it is what
+  keeps the rule reversible: `TeamMemberSelect` resolves its trigger label from the list it was given, so
+  a dropped owner would otherwise read "Unassigned" while still storing their id, leaving the section
+  looking free when it was not, with no way to clear it. Nobody new can be added from outside the owners
+  either way.
+
+Like the approval gate, **this is a UI restriction and RTDB rules do not enforce it** — a rule would have
+to cross-reference `projectAssignees` from a `sectionAssignees` write, which is expressible, but the
+existing gate is unenforced for the same reason and doing one and not the other would be misleading.
 
 There is deliberately **no per-question assignment**. `SessionState` used to carry `assignees` and
 `reviewers` keyed by `item.id`, written by a pair of selects inside every `QuestionCard`, and they were

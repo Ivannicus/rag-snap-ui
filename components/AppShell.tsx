@@ -96,6 +96,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [sectionReviewers, setSectionReviewers] = useState<Record<string, string>>(
     () => initialState?.sectionReviewers ?? {}
   );
+  // Read here, never written here: the dashboard owns this map. The inspector needs it because a
+  // project's owners are the only people its sections may be handed to — see `assignableMembers`.
+  const [projectAssignees, setProjectAssignees] = useState<Record<string, true>>(
+    () => initialState?.projectAssignees ?? {}
+  );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
   // doc always joins the same room instead of minting a new random session.
@@ -196,6 +201,31 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   );
 
   /**
+   * Who this project's sections may be handed to: its owners, and nobody else.
+   *
+   * Work flows through the project, not around it. A lead puts people on a project from the dashboard
+   * (`projectAssignees`), and the section pickers in here offer exactly that set — so a section cannot
+   * name somebody who is not on the project at all, which used to be possible and said nothing about
+   * which of the two was wrong.
+   *
+   * **An unowned project has nobody to give its sections to**, deliberately: the list is empty until a
+   * lead assigns owners, the same way an unreviewed section has nobody who can approve it. Falling back
+   * to the whole bank would quietly undo the restriction on precisely the projects nobody has staffed.
+   *
+   * Filtered from `teamMembers` rather than built from the id map, so the order matches the bank and a
+   * stale owner id — someone assigned and then removed from the bank — resolves to nothing instead of a
+   * blank row. It stays the *full* bank that goes to `SectionGroup` alongside this: turning an id into a
+   * name has to keep working for people this list excludes.
+   */
+  const assignableMembers = useMemo(
+    // Truthiness, not `=== true`, matching `ownerIdsOf` on the dashboard: the two must agree about who
+    // owns a project, and a strict comparison here would silently disagree with the dashboard's own list
+    // over anything but a literal boolean.
+    () => teamMembers.filter((m) => Boolean(projectAssignees[m.id])),
+    [teamMembers, projectAssignees]
+  );
+
+  /**
    * Apply a remote snapshot.
    *
    * There is no echo suppression: every snapshot is applied, including the echo of our own write.
@@ -220,6 +250,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     );
     setSectionReviewers((prev) =>
       sameMap(prev, state.sectionReviewers) ? prev : state.sectionReviewers
+    );
+    setProjectAssignees((prev) =>
+      sameMap(prev, state.projectAssignees) ? prev : state.projectAssignees
     );
   }, []);
 
@@ -263,12 +296,20 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setItemStatus({});
     setSectionAssignees({});
     setSectionReviewers({});
+    setProjectAssignees({});
   }, []);
 
   const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
     setData(loaded);
     setFilename(name);
-    clearOverlays();
+    // Only when this is a *different* doc. Re-opening the doc already on screen — which is what clicking
+    // it on the dashboard does, and the obvious way to go and look at a project you just assigned owners
+    // to — used to wipe every overlay with nothing to put them back: `setDocId` bails out on an unchanged
+    // value, so the subscription effect does not re-run, and `onValue` has already delivered its initial
+    // snapshot and has no *change* to re-send. Owners, approvals and section assignees all read empty
+    // until somebody else wrote something. The overlays already on screen belong to this doc, so there is
+    // nothing to clear.
+    if (docIdRef.current !== loadedDocId) clearOverlays();
     setDocId(loadedDocId);
     syncDocParam(loadedDocId);
     // A doc is open, so whatever the URL was doing is finished. Clearing it here rather than only in
@@ -706,6 +747,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                         onClearSectionReviewer={handleClearSectionReviewer}
                         myMemberId={me?.id}
                         teamMembers={teamMembers}
+                        assignableMembers={assignableMembers}
                       />
                     ))}
                   </div>

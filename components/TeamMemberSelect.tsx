@@ -8,7 +8,17 @@ import type { TeamMember } from "@/lib/types";
 interface Props {
   label: string;
   value?: string;
+  /**
+   * The people this control offers — not necessarily the whole team bank. Callers may hand it a subset
+   * (the section pickers offer a project's owners alone), so anything it needs about a member has to come
+   * from this list.
+   */
   teamMembers: TeamMember[];
+  /**
+   * Shown in place of the member list when `teamMembers` is empty, to say *why* it is empty and where the
+   * fix is. Without it an intentionally restricted list looks like a broken dropdown.
+   */
+  emptyHint?: string;
   onSelect: (memberId: string) => void;
   onClear: () => void;
 }
@@ -17,6 +27,7 @@ export default function TeamMemberSelect({
   label,
   value,
   teamMembers,
+  emptyHint,
   onSelect,
   onClear,
 }: Props) {
@@ -114,6 +125,13 @@ export default function TeamMemberSelect({
                 Unassigned
               </button>
             </li>
+            {/* Kept above the list, not instead of it: Unassigned stays available so an assignment made
+                before the list narrowed can still be cleared from here. */}
+            {teamMembers.length === 0 && emptyHint && (
+              <li>
+                <span className="team-member-select__empty u-text--muted">{emptyHint}</span>
+              </li>
+            )}
             {teamMembers.map((m) => (
               <li key={m.id}>
                 <button

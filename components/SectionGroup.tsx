@@ -30,7 +30,19 @@ interface Props {
   onClearSectionReviewer: (sectionKey: string) => void;
   /** The signed-in user's TeamMember.id, or undefined if they are not in the bank. */
   myMemberId?: string;
+  /**
+   * The whole team bank. Needed for turning any id into a name — including ids the pickers below will
+   * not offer — so it is *not* the list those pickers show. See `assignableMembers`.
+   */
   teamMembers: TeamMember[];
+  /**
+   * Who this project's sections may be handed to: the project's owners, from `projectAssignees`.
+   *
+   * Empty when nobody owns the project, and the pickers then offer nobody: owners come first, on the
+   * Overview dashboard. Kept separate from `teamMembers` because `approveDisabledReason` below has to
+   * name the current reviewer even when that person is no longer an owner.
+   */
+  assignableMembers: TeamMember[];
 }
 
 export default function SectionGroup({
@@ -55,6 +67,7 @@ export default function SectionGroup({
   onClearSectionReviewer,
   myMemberId,
   teamMembers,
+  assignableMembers,
 }: Props) {
   // The same three disjoint buckets the dashboard counts, over this section's items. Approval wins
   // over the original answer, so an approved item is never also counted as unanswered.
@@ -85,6 +98,30 @@ export default function SectionGroup({
     ? `Only ${reviewer?.name ?? "this section's reviewer"} can approve section ${section}.`
     : undefined;
 
+  /**
+   * The people one of the two pickers below offers: this project's owners, plus whoever the field
+   * already names if that person is not one of them.
+   *
+   * The union is not a loophole in the restriction — it is what keeps the restriction reversible. A
+   * picker resolves its trigger label from the list it was given, so a section held by someone since
+   * dropped from the project's owners would otherwise read "Unassigned" while still storing their id:
+   * the assignment would be invisible and unclearable, and the section would look free when it was not.
+   * Listing them keeps the stale name on screen and the Unassigned option one click away. Nobody new can
+   * be added from outside the owners either way.
+   */
+  function optionsFor(current?: string): TeamMember[] {
+    if (!current || assignableMembers.some((m) => m.id === current)) return assignableMembers;
+    const held = teamMembers.find((m) => m.id === current);
+    return held ? [held, ...assignableMembers] : assignableMembers;
+  }
+
+  // Said once, at the point the list is empty, because an empty dropdown otherwise reads as a bug in the
+  // dropdown rather than as work that has to happen somewhere else first.
+  const noOwnersHint =
+    assignableMembers.length === 0
+      ? "Nobody is on this project yet. Assign its team on the Overview dashboard first."
+      : undefined;
+
   return (
     <div>
       {/* Section header */}
@@ -102,7 +139,8 @@ export default function SectionGroup({
           <TeamMemberSelect
             label=""
             value={sectionAssignee}
-            teamMembers={teamMembers}
+            teamMembers={optionsFor(sectionAssignee)}
+            emptyHint={noOwnersHint}
             onSelect={(memberId) => onSaveSectionAssignee(section, memberId)}
             onClear={() => onClearSectionAssignee(section)}
           />
@@ -115,7 +153,8 @@ export default function SectionGroup({
           <TeamMemberSelect
             label=""
             value={sectionReviewer}
-            teamMembers={teamMembers}
+            teamMembers={optionsFor(sectionReviewer)}
+            emptyHint={noOwnersHint}
             onSelect={(memberId) => onSaveSectionReviewer(section, memberId)}
             onClear={() => onClearSectionReviewer(section)}
           />
