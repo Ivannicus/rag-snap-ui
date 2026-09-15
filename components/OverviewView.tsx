@@ -71,6 +71,8 @@ export default function OverviewView({
   const [ownerFilter, setOwnerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Owners staged in the bulk bar, applied to the whole selection on Assign rather than on each pick.
+  const [bulkOwnerIds, setBulkOwnerIds] = useState<string[]>([]);
 
   // ── View mode ──
   //
@@ -275,21 +277,33 @@ export default function OverviewView({
     [reportWriteFailure]
   );
 
-  /** Add owners to every selected project, leaving the owners each already has in place. */
-  const handleBulkAssign = useCallback(
-    (memberIds: string[]) => {
-      if (memberIds.length === 0 || effectiveSelection.length === 0) return;
-      for (const projectId of effectiveSelection) {
-        const previous = ownerIdsOf(overlaysById[projectId] ?? EMPTY_OVERLAYS);
-        const merged = Array.from(new Set([...previous, ...memberIds]));
-        setProjectAssignees(projectId, merged, previous).catch(() =>
-          reportWriteFailure("Bulk assignment")
-        );
-      }
-      setSelectedIds([]);
-    },
-    [effectiveSelection, overlaysById, reportWriteFailure]
-  );
+  /**
+   * Add the staged owners to every selected project, leaving the owners each already has in place.
+   *
+   * Staged rather than applied per pick, because applying on each `onChange` ended the interaction
+   * after one owner: clearing the selection unmounted the bulk bar, and the open picker with it, so a
+   * second name could not be added without selecting the projects again. The picker now holds a real
+   * `value`, which is also what re-enables its own "Clear all", and the selection is cleared once
+   * here — after the writes, when the bar has done its job.
+   */
+  const handleBulkAssign = useCallback(() => {
+    if (bulkOwnerIds.length === 0 || effectiveSelection.length === 0) return;
+    for (const projectId of effectiveSelection) {
+      const previous = ownerIdsOf(overlaysById[projectId] ?? EMPTY_OVERLAYS);
+      const merged = Array.from(new Set([...previous, ...bulkOwnerIds]));
+      setProjectAssignees(projectId, merged, previous).catch(() =>
+        reportWriteFailure("Bulk assignment")
+      );
+    }
+    setBulkOwnerIds([]);
+    setSelectedIds([]);
+  }, [bulkOwnerIds, effectiveSelection, overlaysById, reportWriteFailure]);
+
+  // Staged owners are dropped when the selection empties, so the bar never comes back pre-filled with
+  // names left over from a batch that was already applied or abandoned.
+  useEffect(() => {
+    if (effectiveSelection.length === 0 && bulkOwnerIds.length > 0) setBulkOwnerIds([]);
+  }, [effectiveSelection.length, bulkOwnerIds.length]);
 
   // ── Render ──
 
@@ -448,11 +462,21 @@ export default function OverviewView({
               </span>
               <TeamMemberMultiSelect
                 label=""
-                value={[]}
+                value={bulkOwnerIds}
                 teamMembers={teamMembers}
-                onChange={handleBulkAssign}
+                onChange={setBulkOwnerIds}
                 emptyLabel="Add owners to selected"
               />
+              <button
+                type="button"
+                onClick={handleBulkAssign}
+                disabled={bulkOwnerIds.length === 0}
+                className="p-button--positive is-dense u-no-margin--bottom"
+              >
+                {bulkOwnerIds.length === 0
+                  ? "Assign"
+                  : `Assign ${bulkOwnerIds.length} to ${effectiveSelection.length}`}
+              </button>
               <button
                 type="button"
                 onClick={() => setSelectedIds([])}

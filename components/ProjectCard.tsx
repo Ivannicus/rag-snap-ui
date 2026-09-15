@@ -4,7 +4,7 @@ import ProgressWheel from "./ProgressWheel";
 import DueDateField from "./DueDateField";
 import TeamMemberMultiSelect from "./TeamMemberMultiSelect";
 import { STATUS_BANDS, isOverdue, ownerIdsOf } from "@/lib/projects";
-import { formatDate } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 import type { ProjectSummary, TeamMember } from "@/lib/types";
 
 interface Props {
@@ -70,7 +70,7 @@ export default function ProjectCard({
             {meta.filename}
           </button>
           <span className="u-text--muted p-text--small project-card__uploader">
-            Uploaded by {meta.uploadedByName} &middot; {formatDate(new Date(meta.uploadedAt).toISOString())}
+            Uploaded by {meta.uploadedByName} &middot; {formatTimestamp(meta.uploadedAt)}
           </span>
         </div>
 
@@ -141,7 +141,7 @@ export default function ProjectCard({
           {meta.exportedAt !== null && (
             <p className="u-text--muted p-text--small u-no-margin--bottom">
               <i className="p-icon--export" aria-hidden></i> Exported{" "}
-              {formatDate(new Date(meta.exportedAt).toISOString())}
+              {formatTimestamp(meta.exportedAt)}
               {meta.exportedBy ? ` by ${meta.exportedBy}` : ""}
             </p>
           )}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { getArchivedPayload } from "@/lib/archive";
 import { buildCsv, csvFilenameFor, downloadCsv } from "@/lib/csv";
-import { formatDate } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 import type { ArchivedProjectMeta } from "@/lib/types";
 
 interface Props {
@@ -113,7 +113,7 @@ export default function CompletedProjectsList({
                 {entry.exportedBy}
               </span>
               <span className="completed-row__meta u-text--muted p-text--small">
-                {formatDate(new Date(entry.exportedAt).toISOString())}
+                {formatTimestamp(entry.exportedAt)}
               </span>
               {stillLive ? (
                 <button

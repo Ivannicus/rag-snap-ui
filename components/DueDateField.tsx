@@ -22,6 +22,12 @@ function toDateInputValue(iso: string | null): string {
  *
  * Deliberately without the word "Due" and without a weekday: the field's row already carries a "Due"
  * label, and the control is a fixed width that a longer string would simply be clipped by.
+ *
+ * Formatted in UTC, because that is the zone the value is stored in — a due date is written at UTC
+ * midnight of the chosen day. Letting `toLocaleDateString` convert into the reader's zone first
+ * subtracted a day for everyone west of UTC: a date set as 30 Sep read back as "29 Sep" in New York,
+ * while the `<input type="date">` behind the same control still showed the 30th, because
+ * `toDateInputValue` takes the UTC date part directly. One field, two different days.
  */
 function formatDueDate(iso: string): string {
   const parsed = new Date(iso);
@@ -30,6 +36,7 @@ function formatDueDate(iso: string): string {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   });
 }
 

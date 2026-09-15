@@ -107,9 +107,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [docId, setDocId] = useState<string | null>(null);
   // The dashboard is where a lead starts: which projects exist and who is on them is the question you
   // have before you have a document open, so it is the landing view rather than the inspector.
-  const [activeView, setActiveView] = useState<ActiveView>("overview");
+  //
+  // Except when a document is already in hand. `initialState` means this shell was mounted around a
+  // specific batch — the import handoff — and the reader's question is about that batch, not about the
+  // portfolio. Landing on the dashboard there hides the very thing the mount was for.
+  const [activeView, setActiveView] = useState<ActiveView>(
+    initialState ? "inspector" : "overview"
+  );
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
-  const [hasVisitedOverview, setHasVisitedOverview] = useState(true);
+  // Tracks the mount-once rule below, so it starts true only when the dashboard is the landing view.
+  // Starting it unconditionally true mounted `OverviewView` — and issued its project-list read — even
+  // for a mount that goes straight to the inspector and may never show the dashboard at all.
+  const [hasVisitedOverview, setHasVisitedOverview] = useState(!initialState);
   // Bumped on each entry to the dashboard. Its project list is read one-shot rather than watched, so
   // this is what picks up projects added or exported elsewhere without a reload.
   const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
@@ -142,17 +151,20 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     database: 0,
   });
 
-  const handleChangeView = useCallback((view: ActiveView) => {
-    setActiveView((previous) => {
-      scrollPositions.current[previous] = window.scrollY;
+  // The previous view is read from state rather than from a `setActiveView` updater. React treats
+  // updaters as pure and may re-invoke them, so bumping the refresh key inside one meant a single
+  // switch into the dashboard could re-read the project list twice.
+  const handleChangeView = useCallback(
+    (view: ActiveView) => {
+      if (view === activeView) return;
+      scrollPositions.current[activeView] = window.scrollY;
       // Re-read the project list on each arrival, so the dashboard is never showing a list from
       // before the file that was just loaded, exported or removed.
-      if (view === "overview" && previous !== "overview") {
-        setOverviewRefreshKey((key) => key + 1);
-      }
-      return view;
-    });
-  }, []);
+      if (view === "overview") setOverviewRefreshKey((key) => key + 1);
+      setActiveView(view);
+    },
+    [activeView]
+  );
 
   // Mount each secondary view on first visit, then keep it mounted (never unmount again), so its
   // subscriptions and scroll position survive switching away.
@@ -342,6 +354,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * the content instead makes the link answerable from the doc itself, and routing it through
    * `handleLoad` seeds the room on the way in, so following such a link repairs the gap rather than
    * waiting on it.
+   *
+   * The view switches to the inspector up front, before the fetch resolves, rather than on success.
+   * A link names one document, so the inspector is where the reader is going whatever comes back —
+   * and `sharedDocState`'s "loading" and "missing" messages render inside the inspector, so leaving
+   * the dashboard up until success meant a dead link said nothing at all.
+   *
+   * `setActiveView` directly rather than `handleChangeView`, because that callback changes identity
+   * with `activeView` and this effect must not re-run — it would re-fetch on every view switch. None
+   * of what it adds is wanted here anyway: there is no scroll position to save at mount, and no
+   * project list to refresh on the way out of a dashboard nobody has looked at.
    */
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("doc");
@@ -349,6 +371,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
     let active = true;
     setSharedDocState("loading");
+    setActiveView("inspector");
 
     getSavedFile(id)
       .then((saved) => {

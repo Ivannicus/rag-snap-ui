@@ -74,7 +74,12 @@ export default function ExportButton({
       const exportedByEmail = auth.currentUser?.email ?? "";
 
       void archiveProject({
-        filename: sourceFilename ?? downloadName,
+        // The *source* name, because that is what the completed list feeds back through
+        // `csvFilenameFor` to rebuild this CSV. Storing the download name instead put a name that had
+        // already been through it into it a second time, so a re-download came out as
+        // `results-export.csv-export.csv`. The fallback mirrors `csvFilenameFor`'s own `results` stem,
+        // so a project with no source name still re-downloads under the name it was exported as.
+        filename: sourceFilename ?? "results.json",
         exportedBy,
         exportedByEmail,
         data,

@@ -139,11 +139,24 @@ export function computeProjectStats(
   };
 }
 
-/** A project is overdue if its due date has passed and it is not fully approved. */
+/** A day, in ms. A due date is a calendar day, so it runs out at the end of that day. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A project is overdue once its due date has passed and it is not fully approved.
+ *
+ * A due date is stored at UTC midnight *of* the due day, so the deadline is a full day later than the
+ * stored instant: something due on 30 Sep is late on 1 Oct, not at one minute past midnight on the
+ * 30th. Comparing against the stored instant directly flagged every project overdue a day early, for
+ * the whole of the day it was actually due.
+ *
+ * Judged in UTC, matching how the date is stored and displayed, so a deadline falls at one moment for
+ * the whole team rather than rolling across the dashboard with each reader's offset.
+ */
 export function isOverdue(meta: ProjectMeta, stats: ProjectStats, now = Date.now()): boolean {
   if (!meta.dueDate || stats.complete) return false;
   const due = Date.parse(meta.dueDate);
-  return Number.isFinite(due) && due < now;
+  return Number.isFinite(due) && due + DAY_MS <= now;
 }
 
 export function resolveMembers(ids: string[], teamMembers: TeamMember[]): TeamMember[] {
@@ -180,9 +193,13 @@ export function assignmentsForMember(
   const entries: AssignmentEntry[] = [];
 
   for (const { meta, overlays } of projects) {
+    // Section keys are not all numeric, so `Number(a) - Number(b)` was NaN for most of them and the
+    // order came out arbitrary. `parseQAFile` appends `.1`/`.2` to de-duplicated ids, `resolveSections`
+    // emits `inferred:2` and `3~2` for inferred sections and split parts, and a producer's own ids look
+    // like `A1.2`. Numeric collation orders all of those, and still puts 2 before 10.
     const sections = Object.keys(overlays.sectionAssignees)
       .filter((sectionKey) => overlays.sectionAssignees[sectionKey] === memberId)
-      .sort((a, b) => Number(a) - Number(b));
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     const isOwner = overlays.projectAssignees[memberId] === true;
 

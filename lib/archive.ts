@@ -1,4 +1,4 @@
-import { ref, push, get, update } from 'firebase/database';
+import { ref, get, update } from 'firebase/database';
 import { db } from './firebase';
 import type { ArchivedProjectMeta, ArchivedProjectPayload, ParsedQAFile } from './types';
 
@@ -42,10 +42,23 @@ interface ArchiveInput {
  * Called on both export paths — plain export and export-and-remove — because "this project was
  * finished and its results taken away" is the same event either way, and only one of those paths
  * leaves anything behind in `savedFiles` to remember it by.
+ *
+ * ## Why the entry is keyed by project, not pushed
+ *
+ * The entry id *is* `sourceSessionId`, so archiving the same project twice replaces its entry instead
+ * of adding one. Export is also the way to re-download a CSV, so a `push` id meant a project
+ * accumulated a row in "Completed & exported" — and a count in the summary strip — for every download
+ * anyone ever took, permanently, since the archive is never pruned.
+ *
+ * Replacing means the latest export wins: `exportedAt` and `exportedBy` describe the most recent one,
+ * and the payload matches the results as they stood then. That is the right answer for a list whose
+ * job is to say where a finished project ended up.
+ *
+ * Ids stay collision-free after removal. Export-and-remove frees the `savedFiles` id, but the next
+ * upload is a fresh `push` and never reuses it, so a later project cannot land on this entry.
  */
 export async function archiveProject(input: ArchiveInput): Promise<string> {
-  const entryRef = push(ref(db, 'archivedProjects/index'));
-  const id = entryRef.key as string;
+  const id = input.sourceSessionId;
   const exportedAt = Date.now();
 
   await update(ref(db, 'archivedProjects'), {

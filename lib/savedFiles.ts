@@ -1,4 +1,4 @@
-import { ref, push, set, get, remove, onValue, update } from 'firebase/database';
+import { ref, push, set, get, remove, onValue, update, runTransaction } from 'firebase/database';
 import { db } from './firebase';
 import { isUnanswered } from './utils';
 import type { ParsedQAFile, ProjectMeta, SavedFile } from './types';
@@ -152,24 +152,39 @@ export async function listProjectMetas(): Promise<ProjectMeta[]> {
   const val = snapshot.val() as Record<string, StoredDoc> | null;
   if (!val) return [];
 
-  const backfill: Record<string, number | string[]> = {};
-  const metas = Object.entries(val).map(([id, stored]) => {
+  const metas: ProjectMeta[] = [];
+
+  for (const [id, stored] of Object.entries(val)) {
+    // A record with no filename or no upload time is not a project. It is the residue of a write that
+    // landed on an id nothing lives at any more — see `updateExistingDoc` for how that used to happen
+    // — and it has nothing a card could be drawn from. Skipping it here keeps one bad record from
+    // reaching the dashboard at all, rather than relying on every renderer downstream to survive it.
+    if (typeof stored.filename !== 'string' || typeof stored.uploadedAt !== 'number') continue;
+
     const items = stored.data?.items;
     const hasItems = Array.isArray(items);
 
     let itemCount = stored.itemCount;
     let aiUnansweredIds = stored.aiUnansweredIds;
+    const backfill: Partial<StoredDoc> = {};
 
     if (itemCount === undefined && hasItems) {
       itemCount = items.length;
-      backfill[`${id}/itemCount`] = itemCount;
+      backfill.itemCount = itemCount;
     }
     if (aiUnansweredIds === undefined && hasItems) {
       aiUnansweredIds = aiUnansweredIdsOf(stored.data);
-      backfill[`${id}/aiUnansweredIds`] = aiUnansweredIds;
+      backfill.aiUnansweredIds = aiUnansweredIds;
     }
 
-    return {
+    // Per-record and transactional, rather than one multi-path `update` at the `savedFiles` root. The
+    // root form recreated any record removed between this read and the write, as a partial holding
+    // nothing but the two derived counts.
+    if (Object.keys(backfill).length > 0) {
+      void updateExistingDoc(id, backfill).catch(() => {});
+    }
+
+    metas.push({
       id,
       filename: stored.filename,
       uploadedByName: stored.uploadedByName,
@@ -181,19 +196,43 @@ export async function listProjectMetas(): Promise<ProjectMeta[]> {
       exportedAt: stored.exportedAt ?? null,
       exportedBy: stored.exportedBy ?? null,
       exportedByEmail: stored.exportedByEmail ?? null,
-    };
-  });
-
-  if (Object.keys(backfill).length > 0) {
-    void update(ref(db, 'savedFiles'), backfill).catch(() => {});
+    });
   }
 
   return metas.sort((a, b) => b.uploadedAt - a.uploadedAt);
 }
 
+/**
+ * Merge fields into an existing record, and do nothing at all if there is no such record.
+ *
+ * `update` is not safe for this: RTDB creates the node when it is absent, so editing a project that
+ * someone else removed since the dashboard was read wrote a *new* record holding only the edited
+ * fields — no filename, no `uploadedAt`, no document. That partial came back on the next
+ * `listProjectMetas` as a project with no name and an undefined upload time.
+ *
+ * A transaction is the fix rather than a read-then-write, because the removal can land between the
+ * two. Returning `undefined` from the handler aborts, which is how "leave it alone" is expressed;
+ * `ensureSession` uses the same shape to seed a room without disturbing an existing one.
+ *
+ * A field set to `undefined` is deleted rather than written. RTDB rejects an `undefined` value
+ * outright, so a spread carrying one would fail the whole write — which is what clearing a due date
+ * would otherwise do.
+ */
+function updateExistingDoc(fileId: string, fields: Partial<StoredDoc>): Promise<void> {
+  return runTransaction(ref(db, `savedFiles/${fileId}`), (current: StoredDoc | null) => {
+    if (current === null) return undefined;
+    const next = { ...current };
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) delete next[key as keyof StoredDoc];
+      else Object.assign(next, { [key]: value });
+    }
+    return next;
+  }).then(() => undefined);
+}
+
 /** Set or clear a project's due date. Pass null to clear. */
 export function setDueDate(fileId: string, isoDate: string | null): Promise<void> {
-  return update(ref(db, `savedFiles/${fileId}`), { dueDate: isoDate ?? null });
+  return updateExistingDoc(fileId, { dueDate: isoDate ?? undefined });
 }
 
 /**
@@ -209,7 +248,7 @@ export function markExported(
   exportedByEmail: string,
   exportedAt: number
 ): Promise<void> {
-  return update(ref(db, `savedFiles/${fileId}`), { exportedAt, exportedBy, exportedByEmail });
+  return updateExistingDoc(fileId, { exportedAt, exportedBy, exportedByEmail });
 }
 
 export function subscribeToSavedFiles(
