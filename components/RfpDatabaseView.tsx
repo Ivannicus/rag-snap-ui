@@ -6,7 +6,7 @@ import RfpResultsList from "./RfpResultsList";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToRfpDatabase, searchRfpRecords } from "@/lib/rfpDatabase";
-import { formatDate } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 import type { RfpRecord } from "@/lib/types";
 
 export default function RfpDatabaseView() {
@@ -61,7 +61,7 @@ export default function RfpDatabaseView() {
   const lastImported = useMemo(() => {
     if (records.length === 0) return null;
     const max = Math.max(...records.map((r) => r.importedAt));
-    return formatDate(new Date(max).toISOString());
+    return formatTimestamp(max);
   }, [records]);
 
   return (

@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { removeSavedFile } from "@/lib/savedFiles";
+import { markExported, removeSavedFile } from "@/lib/savedFiles";
+import { archiveProject } from "@/lib/archive";
+import { buildCsv, csvFilenameFor, downloadCsv } from "@/lib/csv";
+import { auth } from "@/lib/firebase";
 import type { ParsedQAFile } from "@/lib/types";
 
 interface Props {
@@ -19,32 +22,8 @@ interface Props {
   onError: (title: string, message: string) => void;
   /** Called after the doc is removed from the shared bank, so the view can close it. */
   onDocRemoved: (docId: string) => void;
-}
-
-/** Escape a value for CSV: wrap in quotes if it contains commas, quotes, or newlines. */
-function csvCell(value: string | number | undefined): string {
-  const str = value === undefined || value === null ? "" : String(value);
-  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
-function buildCsv(
-  data: ParsedQAFile,
-  editedAnswers: Record<string, string>,
-  ratings: Record<string, number>,
-  contextUrls: Record<string, string>
-): string {
-  const header = ["Question", "Original Answer", "Edited Answer", "Context URL", "Rating"];
-  const rows = data.items.map((item) => [
-    csvCell(item.question),
-    csvCell(item.answer),
-    csvCell(editedAnswers[item.id] ?? ""),
-    csvCell(contextUrls[item.id] ?? ""),
-    csvCell(ratings[item.id]),
-  ]);
-  return [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
+  /** Called once an export has been archived, so the dashboard can re-read its lists. */
+  onExported: () => void;
 }
 
 /**
@@ -67,6 +46,7 @@ export default function ExportButton({
   docId,
   onError,
   onDocRemoved,
+  onExported,
 }: Props) {
   const [exported, setExported] = useState(false);
   const [stage, setStage] = useState<Stage>("closed");
@@ -76,41 +56,61 @@ export default function ExportButton({
   const ratingCount = Object.keys(ratings).length;
   const unapprovedCount = readyCount + unansweredCount;
 
-  const downloadName = `${
-    sourceFilename ? sourceFilename.replace(/\.json$/i, "") : "results"
-  }-export.csv`;
+  const downloadName = csvFilenameFor(sourceFilename);
 
   /**
-   * Build the CSV and hand it to the browser.
+   * Build the CSV, hand it to the browser, and record the export.
    *
-   * Returns whether the download was successfully *initiated*. A browser gives no callback for a
-   * download completing, so this cannot mean the file reached the disk: it means the CSV was built
-   * with content, the blob was created, and the click was dispatched without throwing. That is the
-   * strongest signal available in a page, and it is what gates the removal step.
+   * Returns whether the download was successfully *initiated* — see `downloadCsv` for why that is the
+   * strongest available signal. It is what gates the removal step, so the recording below happens only
+   * once the download has actually started.
+   *
+   * Two things are recorded, and both matter on the dashboard. The archive entry is what lets a
+   * completed project still be listed, and its CSV rebuilt, after the `savedFiles` record is gone; the
+   * stamp on the `savedFiles` record is what distinguishes a project that was exported and kept from
+   * one nobody has finished. Both run on both export paths, because "these results were taken away" is
+   * the same event whether or not the project is also removed afterwards.
+   *
+   * Neither is awaited and neither failure blocks the export. The CSV is already on its way to the
+   * reader's disk by this point, and refusing to complete an export that has visibly happened because
+   * a bookkeeping write failed would be worse than a missing archive row. A failed archive write is
+   * surfaced, though, because it is the difference between being able to re-download this project later
+   * and not.
    */
   function runExport(): boolean {
-    try {
-      const csv = buildCsv(data, editedAnswers, ratings, contextUrls);
-      if (!csv) return false;
+    const csv = buildCsv(data, { editedAnswers, ratings, contextUrls });
+    if (!downloadCsv(csv, downloadName)) return false;
 
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      if (blob.size === 0) return false;
+    if (docId) {
+      const exportedBy =
+        auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown";
+      const exportedByEmail = auth.currentUser?.email ?? "";
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = downloadName;
-      // Some browsers only act on a click if the anchor is in the document.
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // Revoke on a later tick. Revoking in the same tick as the click can cancel the download
-      // before it starts, which would make a failed export look like a successful one.
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-      return true;
-    } catch {
-      return false;
+      void archiveProject({
+        // The *source* name, because that is what the completed list feeds back through
+        // `csvFilenameFor` to rebuild this CSV. Storing the download name instead put a name that had
+        // already been through it into it a second time, so a re-download came out as
+        // `results-export.csv-export.csv`. The fallback mirrors `csvFilenameFor`'s own `results` stem,
+        // so a project with no source name still re-downloads under the name it was exported as.
+        filename: sourceFilename ?? "results.json",
+        exportedBy,
+        exportedByEmail,
+        data,
+        editedAnswers,
+        sourceSessionId: docId,
+      })
+        .then(() => onExported())
+        .catch(() =>
+          onError(
+            "Export archived incompletely",
+            "The CSV downloaded, but this project could not be added to the completed list. It will not be possible to re-download the results from here later, so keep the file you just saved."
+          )
+        );
+
+      void markExported(docId, exportedBy, exportedByEmail, Date.now()).catch(() => {});
     }
+
+    return true;
   }
 
   function flashExported() {

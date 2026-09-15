@@ -93,6 +93,19 @@ export function parseQAFile(json: unknown): ParsedQAFile {
   return { generated_at: obj.generated_at, model: obj.model, items };
 }
 
+/**
+ * Format an epoch-milliseconds timestamp for display, or `"—"` if there is no usable one.
+ *
+ * Prefer this over `formatDate(new Date(ms).toISOString())`. `formatDate` catches its own failures,
+ * but that composition puts the fragile call *outside* it: `new Date(undefined).toISOString()` throws
+ * `RangeError`, and a throw during render takes down the whole tree, so one record missing a
+ * timestamp blanked the entire dashboard rather than one line of one card.
+ */
+export function formatTimestamp(ms: number | null | undefined): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
+  return formatDate(new Date(ms).toISOString());
+}
+
 /** Format ISO date string for display */
 export function formatDate(iso: string): string {
   try {

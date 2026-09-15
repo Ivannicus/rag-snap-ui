@@ -35,6 +35,16 @@ export default function Sidebar({
       {/* Nav */}
       <nav className="app-sidebar__nav">
         <button
+          onClick={() => onChangeView("overview")}
+          className={`app-sidebar__nav-item${activeView === "overview" ? " is-active" : ""}`}
+        >
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M4 5a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 15a1 1 0 011-1h5a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zM14 5a1 1 0 011-1h4a1 1 0 011 1v9a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM14 19a1 1 0 011-1h4a1 1 0 011 1v0a1 1 0 01-1 1h-4a1 1 0 01-1-1z" />
+          </svg>
+          Overview
+        </button>
+        <button
           onClick={() => onChangeView("inspector")}
           className={`app-sidebar__nav-item${activeView === "inspector" ? " is-active" : ""}`}
         >

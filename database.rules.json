@@ -14,7 +14,15 @@
       ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
       ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
     },
+    "savedFileData": {
+      ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
+      ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
+    },
     "rfpDatabase": {
+      ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
+      ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
+    },
+    "archivedProjects": {
       ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
       ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)"
     }

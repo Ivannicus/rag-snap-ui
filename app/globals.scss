@@ -1,6 +1,27 @@
+@use "sass:color";
 @use "vanilla-framework";
 
 @include vanilla-framework.vanilla;
+
+// The four-square dashboard glyph on the Cards half of the view toggle, matching the icon beside
+// Overview in the sidebar. Opted in by hand because `vanilla` compiles only its core icon set — the
+// class was already on the button and silently drew nothing, an empty box that still claimed an icon's
+// margins. Included as Vanilla's own mixin rather than inlined as an SVG so it is a real `p-icon--*`:
+// that is what gives it the same box, baseline nudge, `is-light` white variant and margins as
+// `p-icon--menu` on the List half, instead of a second set of values to keep in step by hand.
+@include vanilla-framework.vf-p-icon-switcher-dashboard;
+
+// ...and its white variant in dark mode, which Vanilla will not give it here. This icon is one of the
+// older ones, drawn by a single `background-image` plus an explicit list of dark-theme selectors —
+// `[class*='--dark'] &`, `body.is-dark &`, `&.is-light`, `&.is-dark` — where the newer ones (`p-icon--menu`
+// on the List half among them) hold both colours at once behind `--vf-theme-light` / `--vf-theme-dark`
+// and so follow the flags a bare `.is-dark` sets. This app marks dark mode on `<html>`, not `<body>`
+// (`AppShell`), so `body.is-dark &` never matched and the icon stayed black on a dark button while the
+// one beside it went white. Restated for whichever element carries the class, through Vanilla's own
+// definition mixin so the glyph is not copied.
+.is-dark .p-icon--switcher-dashboard {
+  @include vanilla-framework.vf-icon-switcher-dashboard(vanilla-framework.$colors--dark-theme--icon);
+}
 
 .login-screen {
   min-height: 100vh;
@@ -257,6 +278,59 @@
     border-color: #b8860b;
     gap: 0.25rem;
   }
+
+  // ── The three workflow bands ──
+  // Named after the status rather than after a Vanilla tone, so a badge, a wheel segment and a card
+  // border showing the same status cannot end up different colours. Kept in step with
+  // `STATUS_BANDS` in lib/projects.ts and with `.progress-wheel__band--*` below.
+  &--band-approved {
+    background-color: var(--vf-color-background-positive-default);
+    border-color: var(--vf-color-border-positive);
+    gap: 0.25rem;
+  }
+
+  &--band-ready {
+    background-color: var(--vf-color-background-information-default);
+    border-color: var(--vf-color-border-information);
+  }
+
+  &--band-unanswered {
+    background-color: var(--vf-color-background-negative-default);
+    border-color: var(--vf-color-border-negative);
+  }
+
+  // Wraps a select rather than text, so the horizontal padding gets out of the way. The height stays
+  // the badge row's own — `.section-header .section-header__block` (0,2,0) sets it and would beat a
+  // `height: auto` here anyway — which leaves the trigger 1.375rem of content box to sit in.
+  &--select {
+    gap: 0.375rem;
+    padding: 0.125rem 0.375rem;
+
+    .team-member-select {
+      flex: 0 1 10rem;
+    }
+
+    // A Vanilla button is `font-size: 1rem; line-height: 1.5rem`, so left alone its text is both
+    // bigger than the badge's 0.875rem and taller than the badge itself, and spills out of the top
+    // and bottom borders. Both have to come down for the trigger to sit inside its own height.
+    .team-member-select__trigger {
+      border: none;
+      background: none;
+      height: 1.375rem;
+      padding: 0 0.25rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      gap: 0.375rem;
+    }
+
+    // The default 1.5rem avatar is taller than the trigger. Sized down here rather than by passing
+    // `size="small"`, because the same component renders at full size inside a question card, where
+    // there is room for it.
+    .team-member-avatar {
+      width: 1.25rem;
+      height: 1.25rem;
+    }
+  }
 }
 
 .rating-badge-star {
@@ -392,17 +466,8 @@
   margin-left: 0.25rem;
 }
 
-.context-url-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.context-url-row__link,
-.context-url-row__input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
+// `.context-url-row` used to live here, styling the URL input and its link. The input is gone and the
+// read path is a `p-chip` badge on the card header now, so nothing carries these classes.
 
 // Assignee/reviewer pickers on the section header row.
 //
@@ -444,11 +509,22 @@
     background-color: var(--vf-color-background-active);
   }
 
-  // Vanilla icons are constrained by the smaller dimension, so both must be set together.
+  // One fixed size for the chevron in every state.
+  //
+  // Vanilla's icons hide their own text with `overflow: hidden`, which makes a flex item's automatic
+  // minimum size 0 — so the arrow was free to shrink, and it did: with nobody assigned the trigger's
+  // content fitted and the arrow drew at full size, while a long member's name overflowed and the
+  // flex algorithm took the shortfall out of the label *and* the arrow together. `flex: 0 0 auto`
+  // takes it out of that negotiation, leaving the label — which has `min-width: 0` and its own
+  // `overflow: hidden` — to absorb every overflow by ellipsis, which is what it is for.
+  //
+  // Both dimensions are set: Vanilla icons are background images sized `contain` on a square box, so
+  // a height alone would leave the arrow drawn at its width.
   i {
-    flex-shrink: 0;
+    flex: 0 0 auto;
     width: 1rem;
     height: 1rem;
+    margin-left: auto;
   }
 }
 
@@ -464,6 +540,12 @@
   white-space: nowrap;
 }
 
+// `overscroll-behavior: contain` is the half of the fix that lives in CSS. A wheel that reaches the end of
+// a scroll container chains to the next scrollable ancestor by default — here the document — so scrolling
+// to the last member scrolled the page, and the page's scroll event is what both selects use to close
+// themselves. Containing the overscroll keeps the wheel inside the list. `lockPageScroll` is the other
+// half: it holds the page still for as long as the panel is open, so a wheel anywhere else does nothing
+// either, and the page only comes back when the panel is dismissed.
 .team-member-select__panel {
   position: fixed;
   z-index: 20;
@@ -471,6 +553,7 @@
   max-height: 20rem;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .team-member-select__list {
@@ -480,6 +563,16 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+// A sentence, not an option: it says why the list above it is empty and where the fix lives. Block, so
+// it wraps inside the panel's 16rem instead of becoming a single flex line, and its own font size rather
+// than `p-text--small`, which carries a bottom margin that would leave dead space at the panel's foot.
+.team-member-select__empty {
+  display: block;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
 .team-member-select__option {
@@ -523,6 +616,21 @@
 
   &--edited {
     border-color: var(--vf-color-border-caution);
+  }
+
+  // Approval overrides the other two, matching the precedence the status derivation uses: a signed-off
+  // question is done whether or not it was blank or edited on the way there.
+  &--approved {
+    border-color: var(--vf-color-border-positive);
+    background-color: var(--vf-color-background-positive-default);
+  }
+
+  // Awaiting review — the AI answered it and nobody has signed it off. Border only, no background tint:
+  // this is the most common state by far, so tinting it would leave a page of cards all shouting at
+  // once and drown out the ones that actually need attention. Blue matches the ready band on the wheel
+  // and the "Ready" badge on the section header.
+  &--ready {
+    border-color: var(--vf-color-border-information);
   }
 }
 
@@ -1108,4 +1216,943 @@ mark.rfp-highlight {
   align-items: center;
   gap: 0.75rem;
   margin-top: 0.75rem;
+}
+
+/* ══ Overview dashboard ══ */
+
+// One size for every control in a project card's field rows — the Team select and the Due date button.
+// Defined once as variables because the whole point is that they match: two literals would drift the
+// first time one of them was tuned.
+//
+// The width is set by the Due button rather than by Team: five avatars (`MAX_TRIGGER_AVATARS`), a "+N"
+// circle and a chevron come to ~118px, and a formatted date plus its icon to ~116px, with the year
+// formatting longer in some locales. 9.5rem gives 134px of content space, so both clear it — but only
+// just, so raising `MAX_TRIGGER_AVATARS` past 5 means widening this too: a sixth avatar leaves 2px.
+// The height clears a 1.25rem avatar plus its 2px ring.
+$card-field-width: 9.5rem;
+$card-field-height: 1.75rem;
+
+// Wider than the rest of the app. `.app-main` is capped at 64rem, which fits one column of prose but
+// squeezes a three-column card grid; 80rem is Vanilla's own fixed-width container width.
+.overview {
+  max-width: 80rem;
+}
+
+// `.p-text--small` is a *paragraph* style: it carries `margin-bottom: 0.95rem` and a 0.05rem top nudge
+// for setting body copy. The dashboard uses it for inline labels instead, and in a flex row it is the
+// margin box that `align-items: center` centres — so that bottom margin lifted every such label about
+// half its own height above the control it sits beside, and in a flex column it opened a gap nobody
+// asked for.
+//
+// Reset once here, for spans only: an actual paragraph in this view still wants its spacing, and
+// `span` keeps this from touching one. `.overview` plus the element selector clears the 0,1,0 of
+// `.p-text--small` without needing `!important`.
+.overview span.p-text--small {
+  margin-bottom: 0;
+  padding-top: 0;
+}
+
+.overview__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 5rem 0;
+}
+
+.overview__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.overview__tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.overview__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.overview__control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+
+  select {
+    width: auto;
+    min-width: 10rem;
+    margin-bottom: 0;
+  }
+}
+
+// The right-hand end of the control row: the count captioning the Cards/List toggle. The auto margin
+// is what pushes the pair away from the three selects, and it lives here rather than on the count
+// because the count is now a child rather than a sibling of them.
+.overview__control--view {
+  margin-left: auto;
+}
+
+// Centred over the toggle, and centred by `text-align` rather than by `align-items: center` on the
+// column: stretched to the column's full width the caption is exactly as wide as the toggle below it,
+// so the two stay centred on each other even if the count outgrows the buttons. Its old
+// `margin-bottom: 0.5rem` is gone with the auto margin: that pair lifted it off the row's `flex-end`
+// baseline back when it was a sibling of the three selects, and as a caption inside the column it wants
+// the same `p-text--small` margin the "Sort by" / "Owner" / "Status" labels carry instead.
+.overview__count {
+  text-align: center;
+}
+
+// The Cards/List toggle. Vanilla's segmented-control pattern happens to leave its buttons with no
+// bottom margin today, but `.overview__controls` is `align-items: flex-end` — one appearing would lift
+// the whole toggle off the baseline the three selects sit on. Pinned rather than trusted.
+//
+// Two thirds of the 22rem it was first widened to, as requested — still wider than the two labels ask
+// for, so there is room for the icons to sit clear of them. The width goes on the control and the
+// buttons take equal shares of it (`flex: 1 1 0`, the list being `display: flex`) rather than each
+// growing by its own content: sized by content, "Cards" is the wider half and the join between them
+// sits off-centre under the caption. Vanilla's own `text-align: center` then centres each label in its
+// half — the buttons are `inline-block`, not flex containers, so `justify-content` would do nothing.
+.overview__view-toggle {
+  width: 14.75rem;
+  max-width: 100%;
+}
+
+// Two classes deep so this beats `.p-button--brand`/`--base` on the same element (0,1,0).
+.overview__view-toggle .p-segmented-control__button {
+  flex: 1 1 0;
+  margin-bottom: 0;
+
+  // Orange on both halves, so the unselected one has a visible outline. `.p-button--base` sets every
+  // one of its border colours to `transparent` — that is why only the pressed button had an edge — and
+  // it sets them per state, including `[aria-pressed='true']` (0,2,0), which the buttons here carry. So
+  // the states are restated rather than left to the one declaration above, which would only tie with
+  // those on specificity and win on source order alone.
+  //
+  // The exact fill of the selected half, not merely an orange: `p-button--brand` plus the button's own
+  // `aria-pressed="true"` resolves to Vanilla's *active* brand, so the value is computed here the same
+  // way `%p-button--brand-light` computes it rather than pinned to a literal that would drift if the
+  // theme moved. `$color-brand-dark` is `$color-brand`, so one value covers `is-dark` too — which is why
+  // this can be a build-time colour where `--vf-color-border-caution` had to be a themed custom
+  // property.
+  &,
+  &:hover,
+  &:active,
+  &[aria-pressed="true"] {
+    // `-namespace.$var` does not parse — Sass reads the minus as part of the namespace — hence `* -1`.
+    border-color: color.adjust(
+      vanilla-framework.$color-brand,
+      $lightness: vanilla-framework.$active-background-opacity-percentage * -1
+    );
+  }
+
+  // The gap between an icon and its label. Vanilla's `%vf-button-has-icon` gives an icon $sph--small of
+  // margin on both sides, then cancels it again on `:first-child` and `:last-child` — and the icon here
+  // is the button's *only* element child, so it is both, and a space in the markup disappeared into that
+  // negative right margin. Pseudo-classes bring these to 0,4,0, over Vanilla's own 0,3,0. The left one
+  // goes to zero rather than staying negative because the pair is centred in a button wider than it:
+  // a negative outer margin shifts the visible group off the centre the browser measured.
+  [class*="p-icon"] {
+    &:first-child {
+      margin-left: 0;
+    }
+
+    &:last-child {
+      margin-right: 0.5rem;
+    }
+  }
+}
+
+// Sticks to the top of the scroll area so a selection made at the bottom of a long grid can still be
+// acted on without scrolling back up. Above the cards, below the sidebar's z-index of 100.
+.overview__bulk {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--vf-color-border-information);
+  background-color: var(--vf-color-background-information-default);
+
+  .team-member-select {
+    flex: 0 1 16rem;
+  }
+}
+
+/* ── Summary strip ── */
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1px;
+  margin-bottom: 1.5rem;
+  // A single background behind 1px grid gaps draws the dividers, so no tile needs its own border.
+  background-color: var(--vf-color-border-low-contrast);
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.summary-strip__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--vf-color-background-default);
+  // A left accent keyed to the tile's tone, rather than a filled background, so five tiles side by
+  // side stay legible instead of turning into a block of colour.
+  border-left: 3px solid transparent;
+
+  &--positive { border-left-color: var(--vf-color-border-positive); }
+  &--caution  { border-left-color: var(--vf-color-border-caution); }
+  &--negative { border-left-color: var(--vf-color-border-negative); }
+  &--muted    { border-left-color: var(--vf-color-border-low-contrast); }
+}
+
+.summary-strip__value {
+  font-size: 1.75rem;
+  line-height: 1.1;
+  font-weight: 300;
+}
+
+.summary-strip__label {
+  font-size: 0.8125rem;
+  color: var(--vf-color-text-muted);
+}
+
+.summary-strip__hint {
+  font-size: 0.75rem;
+  color: var(--vf-color-text-muted);
+}
+
+/* ── Project grid ── */
+
+// Two columns from tablet, three once there is room for them. `auto-fill` with a minimum rather than a
+// fixed count, so the grid answers the window rather than a breakpoint guess.
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* ── Project list view ── */
+
+// The alternative to the card grid: one line per project, so thirty of them can be read down a column.
+//
+// The grid template is on the *row*, not on this container, because each row needs its own border and
+// selected/overdue state and `display: contents` would throw both away. Repeating the template is what
+// makes the columns line up down the page; every column is therefore a fixed width, never `auto` or
+// `1fr`, which would size itself per row (or per viewport) and stagger the values.
+//
+// The widths live here as custom properties so the header row and the project rows read them from one
+// place, and so the narrow-screen block below can reuse them as flex bases. Each is sized to its own
+// longest plausible value — a three-digit count plus its word — not to a common width: the point of a
+// fixed track is that the column starts at the same x on every row, not that every column is equal.
+//
+// The name is the one elastic track, and the only one: it takes every spare pixel so the right-hand
+// group ends flush with the row's right edge instead of trailing off into dead space, and it is the
+// track whose content ellipses, so growth costs nothing. Column alignment down the page survives
+// because every *other* track is fixed — a second `1fr` anywhere would break it.
+.project-list {
+  --list-col-select: 1.25rem;
+  --list-col-name: minmax(18rem, 1fr);
+  --list-col-bar: 8rem;
+  // Sized for a badge at its widest, which is now every badge in the band: the count is padded to three
+  // digits, so `1 Ready` is exactly as wide as `129 Ready`.
+  //
+  // Each carries real headroom over the label it holds, deliberately. The badge's width comes from the
+  // font — a `3ch` digit box plus a word — while these are `rem`, so the two only agree by measurement,
+  // and a track that merely *just* fits at one font stack clips at the next. The slack costs nothing:
+  // the badge sits at the left of its cell and the name track absorbs whatever is left over.
+  //
+  // Each includes the badge's 1rem of extra right padding — change one and the other has to follow, or the
+  // padding comes straight back out of the label.
+  --list-col-approved: 8.5rem;
+  --list-col-ready: 7rem;
+  --list-col-unanswered: 9.5rem;
+  --list-col-team: 9rem;
+
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.project-list__row {
+  display: grid;
+  // checkbox | name | approved bar | approved | ready | unanswered | team
+  // The three badge tracks are in `STATUS_BANDS` order; `ProjectListRow` maps that array straight into
+  // them, so reordering the array means reordering these three (and the header row's labels) with it.
+  grid-template-columns:
+    var(--list-col-select)
+    var(--list-col-name)
+    var(--list-col-bar)
+    var(--list-col-approved)
+    var(--list-col-ready)
+    var(--list-col-unanswered)
+    var(--list-col-team);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid transparent;
+
+  & + & {
+    border-top: 1px solid var(--vf-color-border-low-contrast);
+  }
+
+  &:not(.project-list__head):hover {
+    background-color: var(--vf-color-background-hover);
+  }
+
+  &.is-selected {
+    background-color: var(--vf-color-background-information-default);
+    border-left-color: var(--vf-color-border-information);
+  }
+
+  // Loses to `.is-selected` on source order alone if both apply, which is the right way round: the
+  // selection is the thing the user just did.
+  &--overdue {
+    border-left-color: var(--vf-color-border-negative);
+  }
+}
+
+.project-list__head {
+  background-color: var(--vf-color-background-alt);
+  border-bottom: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.project-list__select {
+  padding-top: 0;
+  min-height: 0;
+
+  .p-checkbox__label {
+    padding-top: 0;
+    min-height: 1rem;
+  }
+}
+
+// Same treatment as the card's filename — a plain-text button that opens the project — but it also
+// carries the opening spinner, since a row has no space for a separate Open button.
+//
+// `min-width: 0` is what lets the button be narrower than its own text: a grid item's automatic minimum
+// size is its content, so without this the name would push past its track instead of ellipsing.
+.project-list__filename {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 550;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+}
+
+// The truncation has to be on a child, not on the button: `text-overflow` applies to a block container,
+// and the button is a flex container so it would clip without ever drawing an ellipsis. The spinner is
+// the button's other child, which is why it has to be a flex container in the first place.
+.project-list__filename-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// One badge per track, and the wrapper is rendered whether or not it holds a badge: a band at zero drops
+// its badge but keeps its column, so the counts that *are* there stay under their headings instead of
+// sliding left into the gap. Clipping rather than nowrapping past the track keeps a four-digit count from
+// reaching into the next column.
+//
+// Left-aligned inside the cell, under a left-aligned heading: the badge starts at its column's left edge
+// on every row, so a count that widens from `9` to `142` grows rightwards into the column's own slack
+// instead of shifting where the eye has to look. The *group* of columns is what hugs the row's right
+// edge, and that comes from the elastic name track, not from anything in here.
+.project-list__badge {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+
+  // The badge draws at its own size and is never squeezed into the cell. Without this it is a shrinkable
+  // flex item, so a track a shade too narrow does not overflow visibly — it silently compresses the badge
+  // and `white-space: nowrap` cuts the label off inside its own border. That failure looks like a styling
+  // bug rather than a width that needs 0.25rem more, which is exactly how it got missed once already.
+  > * {
+    flex: none;
+  }
+
+  // Trailing room after the label, so the badge is not read as ending at the word. It roughly matches the
+  // pad the three-digit count leaves in front of a one-digit number, which is what makes the tile look
+  // deliberately sized rather than merely too big for its text.
+  //
+  // Scoped to the list on purpose: `.section-header__block` is shared with the section headers, where the
+  // tighter symmetric padding is the right look. Two classes beat the one-class base rule on specificity.
+  .section-header__block {
+    padding-right: 1.5rem;
+  }
+}
+
+// A three-digit box for the count, so every badge in a band is one width whatever the number: `1 Ready`
+// and `129 Ready` draw identical tiles, with the slack falling *before* the digits rather than stretching
+// the badge. Without this the tile's width tracked the count and the labels staggered down the column.
+//
+// `ch` is the advance measure of `0`, so `3ch` is exactly three digits — and tabular figures are what
+// make that true of the other nine as well, `1` included. `min-width` rather than `width`: a fourth digit
+// should widen the badge, not spill out of a fixed box and collide with the label.
+//
+// The gap to the label is a margin, not a space in the markup. `.section-header__block` is an inline flex
+// container, and a whitespace-only run between two flex items is not rendered.
+.project-list__badge-count {
+  flex: none;
+  min-width: 3ch;
+  margin-right: 0.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// ── The approved bar ──
+//
+// One metric, unlike the wheel's three: filled length is what compares across rows. Coloured from the
+// same semantic variable as `.progress-wheel__band--approved`, so the two views agree on what approved
+// looks like in either theme.
+//
+// The track takes whatever `--list-col-bar` leaves after the percentage box and the gap — 5rem at the
+// default 8rem. A short bar still compares fine because every row's is the same length; length only has
+// to be readable as a fraction of the track, not as an absolute.
+.approved-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.approved-bar__track {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 0.5rem;
+  background-color: var(--vf-color-border-low-contrast);
+  overflow: hidden;
+}
+
+.approved-bar__fill {
+  height: 100%;
+  background-color: var(--vf-color-border-positive);
+  transition: width 0.2s;
+}
+
+// Tabular figures and a fixed box, so the percentages align in their column and the bar beside them
+// does not change length as a project crosses from 9% to 10%.
+.approved-bar__value {
+  flex: 0 0 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// Below this the seven tracks no longer fit, so the row stops being a grid and wraps instead. Aligned
+// columns are the first thing to go: with the header hidden there is nothing left to align under, and an
+// empty badge slot would be spending width the row no longer has — so the badges collapse to their
+// content here and the zero-count ones disappear entirely. The row still keeps its identity as a row
+// rather than collapsing into a card, which is what the other view is for.
+@media (max-width: 60rem) {
+  .project-list__row {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
+  .project-list__filename {
+    flex: 1 1 10rem;
+  }
+
+  .approved-bar {
+    flex: 0 0 var(--list-col-bar);
+  }
+
+  .project-list__badge {
+    flex: 0 0 auto;
+
+    &:empty {
+      display: none;
+    }
+  }
+
+  .project-list__head {
+    display: none;
+  }
+}
+
+.project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin-bottom: 0;
+  border: 1px solid var(--vf-color-border-low-contrast);
+  transition: border-color 0.1s, box-shadow 0.1s;
+
+  &:hover {
+    border-color: var(--vf-color-border-high-contrast);
+  }
+
+  &.is-selected {
+    border-color: var(--vf-color-border-information);
+    box-shadow: inset 3px 0 0 var(--vf-color-border-information);
+  }
+
+  &--overdue {
+    border-left: 3px solid var(--vf-color-border-negative);
+  }
+}
+
+.project-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.project-card__select {
+  flex-shrink: 0;
+  // Vanilla's checkbox label carries the click target and its own top padding; zero it so the box
+  // lines up with the filename rather than sitting a line below it.
+  padding-top: 0;
+  min-height: 0;
+
+  .p-checkbox__label {
+    padding-top: 0;
+    min-height: 1rem;
+  }
+}
+
+.project-card__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.project-card__filename {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 550;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.project-card__uploader {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card__status {
+  flex-shrink: 0;
+}
+
+.project-card__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.project-card__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.project-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.project-card__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+// The Team select's trigger and the Due button, sized and shaped as one control type.
+//
+// Both are Vanilla base buttons, so this only has to pin what Vanilla leaves to the content: a fixed
+// box, square corners to match the rest of the app's compact controls, and Vanilla's 1rem horizontal
+// padding cut to 0.5rem — at 2rem it left too little of an 8.5rem box for the avatars or a date.
+// `overflow: hidden` is the guarantee that neither can ever push the row around, whatever it holds.
+//
+// The date input is in the list too, so switching the Due field into edit mode swaps one control for
+// another of exactly the same size instead of making the row jump.
+.team-member-select--compact .team-member-select__trigger,
+.due-date-field,
+.due-date-field__input {
+  box-sizing: border-box;
+  width: $card-field-width;
+  height: $card-field-height;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 0 0.5rem;
+  border-radius: 0;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  font-size: 0.875rem;
+  overflow: hidden;
+}
+
+// "Team" and "Due", each sitting beside its own control. The shared `span.p-text--small` reset above is
+// what lets `align-items: center` on the row actually centre these against their buttons; `line-height`
+// matches the avatar height so the text sits on the control's centre line rather than near it.
+.project-card__row-label {
+  display: inline-flex;
+  align-items: center;
+  // Both labels are plain text with nothing before them, so they share a left edge in this column.
+  justify-content: flex-start;
+  flex-shrink: 0;
+  width: 4rem;
+  // Matched to the control beside it, so "Team" and "Due" sit on exactly their button's centre line
+  // rather than near it.
+  height: $card-field-height;
+  line-height: $card-field-height;
+  // Heavier than the body text around it, so each reads as a field name rather than as prose.
+  font-weight: 550;
+}
+
+.project-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+/* ── Overlapping avatar stack ── */
+
+.member-stack {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+// Each avatar laps the one before it, so a team of six costs about the width of three.
+.member-stack__item {
+  display: inline-flex;
+  margin-right: -0.375rem;
+  border-radius: 50%;
+  // Rings each avatar in the card colour so overlapping edges stay distinguishable.
+  box-shadow: 0 0 0 2px var(--vf-color-background-default);
+
+  &:last-child {
+    margin-right: 0;
+  }
+}
+
+// The last circle in the stack, not a chip beside it: same 1.25rem round footprint as a
+// `--small` avatar, the same ring, and no left margin so it laps the avatar before it exactly as the
+// avatars lap each other. Square and detached, it read as a separate control rather than as the
+// remainder of the row of faces.
+//
+// Fixed width rather than `min-width`, so "+2" and "+12" occupy the same space and the stack's total
+// width does not depend on how many members happen to be hidden.
+.member-stack__overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 50%;
+  // Small enough for "+12" to fit inside a 20px circle without padding.
+  font-size: 0.625rem;
+  line-height: 1;
+  background-color: var(--vf-color-background-alt);
+  border: 1px solid var(--vf-color-border-high-contrast);
+  box-shadow: 0 0 0 2px var(--vf-color-background-default);
+}
+
+// The compact wrapper, for the grid of project cards. Its trigger is sized alongside the Due button in
+// the shared card-field rule above; what is left here is the wrapper itself, which the base
+// `.team-member-select` declares as `flex: 1 1 12rem` and which therefore stretches and shrinks with
+// whatever sits beside it.
+.team-member-select--compact {
+  flex: 0 0 auto;
+
+  // Avatars must hold their size inside a fixed box rather than being squeezed to fit.
+  .member-stack {
+    flex-shrink: 0;
+  }
+
+  // "Assign" centred in the box. Two defaults have to be undone for it: the label is `flex: 1 1 auto`,
+  // so it would absorb all the free space and leave `justify-content` nothing to centre, and the chevron
+  // is pushed right by `margin-left: auto`, which would hold the pair apart at opposite ends. With both
+  // released, the word and its chevron centre together as one group.
+  .team-member-select__trigger.is-empty {
+    justify-content: center;
+
+    .team-member-select__trigger-label {
+      flex: 0 1 auto;
+    }
+
+    i {
+      margin-left: 0.25rem;
+    }
+  }
+}
+
+/* ── Progress wheel ── */
+
+.progress-wheel {
+  position: relative;
+  flex-shrink: 0;
+}
+
+// One track per ring, and the hover target for that ring — a status sitting at 0% has no arc to point
+// at, so the track is what stays pointable. Tinted towards its own status rather than left neutral, so
+// three concentric rings still read as three different things when all three are nearly empty.
+.progress-wheel__track {
+  stroke: var(--vf-color-border-low-contrast);
+  cursor: pointer;
+  opacity: 0.35;
+
+  &--approved   { stroke: var(--vf-color-border-positive); }
+  &--ready      { stroke: var(--vf-color-border-information); }
+  &--unanswered { stroke: var(--vf-color-border-negative); }
+}
+
+.progress-wheel__band {
+  // Butt caps, not round: a round cap overhangs the arc's own end by half the stroke width, which on a
+  // near-empty ring is most of what you see and makes 2% look like 8%.
+  stroke-linecap: butt;
+  // The track underneath carries the hover, so this must not intercept it.
+  pointer-events: none;
+  transition: opacity 0.1s;
+
+  &.is-hovered {
+    opacity: 0.75;
+  }
+
+  &--approved   { stroke: var(--vf-color-border-positive); }
+  &--ready      { stroke: var(--vf-color-border-information); }
+  &--unanswered { stroke: var(--vf-color-border-negative); }
+}
+
+// Sized to the innermost ring's clear space and centred over the wheel, so the readout never overlaps a
+// ring. Absolute centring by translate rather than `inset: 0`, because the box is smaller than the SVG.
+.progress-wheel__center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.0625rem;
+  // The rings beneath must stay hoverable through the middle of the wheel.
+  pointer-events: none;
+  text-align: center;
+  overflow: hidden;
+}
+
+.progress-wheel__value {
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 300;
+}
+
+// No letter-spacing and no nowrap: the readout is only as wide as the innermost ring's clear space, so
+// "Unanswered" needs every pixel and must be allowed to wrap rather than be clipped.
+.progress-wheel__label {
+  font-size: 0.5625rem;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--vf-color-text-muted);
+}
+
+.progress-wheel__tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  margin-top: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  pointer-events: none;
+  color: var(--vf-color-background-default);
+  background-color: var(--vf-color-text-default);
+}
+
+/* ── Due date ── */
+
+.due-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  // The date sits left, against the icon, rather than centred: a centred string of varying length looks
+  // like it is moving each time the date changes, even inside a box that is not.
+  justify-content: flex-start;
+  text-align: left;
+
+  i {
+    flex-shrink: 0;
+  }
+
+  // "Set date" centred in the box, icon and all, rather than hugging the left edge of an otherwise
+  // empty button. `__value` does not grow, so centring the row is all this takes.
+  &--empty {
+    justify-content: center;
+  }
+
+  // Red text and a red border, which with the card's own overdue accent and its "Overdue" status badge
+  // is enough — this is where the inline "Overdue" chip used to be, and it did not fit.
+  &--overdue {
+    color: var(--vf-color-border-negative);
+    border-color: var(--vf-color-border-negative);
+  }
+}
+
+// Clipped rather than allowed to widen the button. A locale that formats longer than the box loses its
+// tail instead of breaking the row, and the button's `title` and `aria-label` carry the full date.
+.due-date-field__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Completed & exported list ── */
+
+.completed-list {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.completed-list__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.completed-list__count {
+  padding: 0 0.375rem;
+  background-color: var(--vf-color-background-alt);
+  border: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.completed-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.completed-row__icon {
+  flex-shrink: 0;
+}
+
+.completed-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Fixed columns so the rows read as a table rather than as ragged text, without the markup of one.
+.completed-row__meta {
+  flex-shrink: 0;
+  width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  @media (max-width: 900px) {
+    display: none;
+  }
+}
+
+.completed-row__action {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ── My assignments ── */
+
+.my-assignments__summary {
+  margin-bottom: 0.75rem;
+}
+
+.my-assignments__empty {
+  padding: 3rem 0;
+  text-align: center;
+}
+
+.my-assignments__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.my-assignments__head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.my-assignments__link {
+  font-weight: 550;
+  text-align: left;
+}
+
+.my-assignments__detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* ── Approval row on a question card ── */
+
+.question-card__approval {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+// The multi-select marks chosen members with a tick; tint the row too so a long team list can be
+// scanned without reading every icon.
+.team-member-select__option.is-selected {
+  background-color: var(--vf-color-background-information-default);
 }
