@@ -1,12 +1,14 @@
 "use client";
 
 import QuestionCard from "./QuestionCard";
-import TeamMemberAvatar from "./TeamMemberAvatar";
-import { isUnanswered } from "@/lib/utils";
-import type { QAItem, TeamMember } from "@/lib/types";
+import TeamMemberSelect from "./TeamMemberSelect";
+import { questionState } from "@/lib/utils";
+import type { QAItem, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
-  section: string;
+  section: SectionInfo;
+  /** Position in the rendered list. Only used to mint a unique DOM id for this section's panel. */
+  index: number;
   items: QAItem[];
   searchTerm?: string;
   editedAnswers: Record<string, string>;
@@ -18,17 +20,31 @@ interface Props {
   contextUrls: Record<string, string>;
   onSaveContextUrl: (id: string, url: string) => void;
   onClearContextUrl: (id: string) => void;
-  assignees: Record<string, string>;
-  onSaveAssignee: (id: string, memberId: string) => void;
-  onClearAssignee: (id: string) => void;
-  reviewers: Record<string, string>;
-  onSaveReviewer: (id: string, memberId: string) => void;
-  onClearReviewer: (id: string) => void;
+  /** Ids a human has approved. Missing id means the question is still ready for approval. */
+  approvals: Record<string, true>;
+  onSetApproved: (id: string, approved: boolean) => void;
+  /** Ids of the cards that are expanded. Missing id means collapsed. */
+  expandedIds: Record<string, true>;
+  onSetExpanded: (id: string, open: boolean) => void;
+  /**
+   * Whether this section's questions are shown. Independent of `expandedIds`: hiding the list
+   * leaves each card's own expansion alone, so re-opening the section restores it as it was.
+   */
+  open: boolean;
+  onSetOpen: (sectionKey: string, open: boolean) => void;
+  /** This section's assignee/reviewer. Assignment is per section, not per question. */
+  assignee?: string;
+  onSaveAssignee: (sectionKey: string, memberId: string) => void;
+  onClearAssignee: (sectionKey: string) => void;
+  reviewer?: string;
+  onSaveReviewer: (sectionKey: string, memberId: string) => void;
+  onClearReviewer: (sectionKey: string) => void;
   teamMembers: TeamMember[];
 }
 
 export default function SectionGroup({
   section,
+  index,
   items,
   searchTerm = "",
   editedAnswers,
@@ -40,70 +56,74 @@ export default function SectionGroup({
   contextUrls,
   onSaveContextUrl,
   onClearContextUrl,
-  assignees,
+  approvals,
+  onSetApproved,
+  expandedIds,
+  onSetExpanded,
+  open,
+  onSetOpen,
+  assignee,
   onSaveAssignee,
   onClearAssignee,
-  reviewers,
+  reviewer,
   onSaveReviewer,
   onClearReviewer,
   teamMembers,
 }: Props) {
-  const unansweredCount = items.filter(
-    (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
-  ).length;
-  const answeredCount = items.length - unansweredCount;
+  // The section's own tallies. Ready and Approved are counted separately: a section is only finished
+  // when its Ready count reaches zero, which the old single "Answered" figure could not show.
+  const counts = { unanswered: 0, ready: 0, approved: 0 };
+  for (const item of items) {
+    counts[questionState(item.answer, editedAnswers[item.id], approvals[item.id] === true)]++;
+  }
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
-  const assigneeId = items.length > 0 ? assignees[items[0].id] : undefined;
-  const assigneeMember = teamMembers.find((m) => m.id === assigneeId);
-
-  const reviewerId = items.length > 0 ? reviewers[items[0].id] : undefined;
-  const reviewerMember = teamMembers.find((m) => m.id === reviewerId);
+  // Keyed on list position, not on section.key. Keys are used verbatim from explicit labels, so they
+  // carry spaces and punctuation an id cannot; squeezing those out collides — "A/B" and "A B" both
+  // reduce to "A-B", as do the split part "3~2" and a hyphen-delimited section "3-2" — and a
+  // duplicate id points aria-controls at whichever panel the document happens to reach first.
+  const panelId = `section-cards-${index}`;
 
   return (
     <div>
       {/* Section header */}
       <div className="section-header">
-        <span className="p-heading--5 u-no-margin--bottom">
-          Section {section}
-        </span>
-        <span className="section-header__block">
-          Assignee:
-          <span className="section-header__assignment">
-            {assigneeMember ? (
-              <>
-                <TeamMemberAvatar member={assigneeMember} size="small" />
-                {assigneeMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
-        </span>
-        <span className="section-header__block">
-          Reviewer:
-          <span className="section-header__assignment">
-            {reviewerMember ? (
-              <>
-                <TeamMemberAvatar member={reviewerMember} size="small" />
-                {reviewerMember.name}
-              </>
-            ) : (
-              "Unassigned"
-            )}
-          </span>
-        </span>
+        <span className="p-heading--5 u-no-margin--bottom">{section.label}</span>
+
+        {/* Assignee and reviewer, one clickable box each. Both read straight off the section's
+            identity, so every question in the section shows the same assignment however the list
+            is filtered. */}
+        <TeamMemberSelect
+          label="Assignee:"
+          value={assignee}
+          teamMembers={teamMembers}
+          onSelect={(memberId) => onSaveAssignee(section.key, memberId)}
+          onClear={() => onClearAssignee(section.key)}
+        />
+        <TeamMemberSelect
+          label="Reviewer:"
+          value={reviewer}
+          teamMembers={teamMembers}
+          onSelect={(memberId) => onSaveReviewer(section.key, memberId)}
+          onClear={() => onClearReviewer(section.key)}
+        />
+
         <span className="section-header__block">
           {items.length} {items.length === 1 ? "Question" : "Questions"}
         </span>
-        {answeredCount > 0 && (
-          <span className="section-header__block section-header__block--positive">
-            {answeredCount} Answered
+        {counts.ready > 0 && (
+          <span className="section-header__block section-header__block--information">
+            {counts.ready} Ready
           </span>
         )}
-        {unansweredCount > 0 && (
+        {counts.approved > 0 && (
+          <span className="section-header__block section-header__block--positive">
+            {counts.approved} Approved
+          </span>
+        )}
+        {counts.unanswered > 0 && (
           <span className="section-header__block section-header__block--negative">
-            {unansweredCount} Unanswered
+            {counts.unanswered} Unanswered
           </span>
         )}
         {editedCount > 0 && (
@@ -112,10 +132,29 @@ export default function SectionGroup({
           </span>
         )}
         <div className="section-header__rule" />
+
+        {/* Whole-section toggle. Last in the row, past the rule, so it sits at the right edge. */}
+        <button
+          type="button"
+          onClick={() => onSetOpen(section.key, !open)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          title={open ? "Collapse section" : "Expand section"}
+          className="section-header__toggle"
+        >
+          <i className={open ? "p-icon--chevron-up" : "p-icon--chevron-down"}></i>
+          <span className="u-off-screen">
+            {open ? `Collapse ${section.label}` : `Expand ${section.label}`}
+          </span>
+        </button>
       </div>
 
-      {/* Question cards */}
-      <div className="section-cards">
+      {/* Question cards. Hidden rather than unmounted when the section is closed: a card mid-edit
+          would otherwise lose its unsaved draft to a stray click on the section toggle. */}
+      <div
+        id={panelId}
+        className={`section-cards ${open ? "" : "is-collapsed"}`}
+      >
         {items.map((item) => (
           <QuestionCard
             key={item.id}
@@ -130,13 +169,10 @@ export default function SectionGroup({
             contextUrl={contextUrls[item.id]}
             onSaveContextUrl={onSaveContextUrl}
             onClearContextUrl={onClearContextUrl}
-            assignee={assignees[item.id]}
-            onSaveAssignee={onSaveAssignee}
-            onClearAssignee={onClearAssignee}
-            reviewer={reviewers[item.id]}
-            onSaveReviewer={onSaveReviewer}
-            onClearReviewer={onClearReviewer}
-            teamMembers={teamMembers}
+            approved={approvals[item.id] === true}
+            onSetApproved={onSetApproved}
+            open={expandedIds[item.id] === true}
+            onSetOpen={onSetExpanded}
           />
         ))}
       </div>

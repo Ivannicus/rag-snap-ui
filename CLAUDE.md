@@ -7,14 +7,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run dev      # Start dev server at http://localhost:3000
 npm run build    # Production build
-npm run lint     # ESLint via next lint
+npm run lint     # eslint . — flat config in eslint.config.mjs (`next lint` was removed in Next 16)
 ```
 
 There are no tests in this project.
 
 ## What this app does
 
-RAG Snap UI is a Next.js app for inspecting and editing RAG (Retrieval-Augmented Generation) Q&A result files. Users sign in with Google (@canonical.com accounts only), load a JSON file, browse questions grouped by section, filter/search results, inline-edit answers, rate answers (1–5 stars), attach context source URLs to unanswered questions, share a live-synced session with collaborators, and export results as CSV.
+RAG Snap UI is a Next.js app for inspecting and editing RAG (Retrieval-Augmented Generation) Q&A result files. Users sign in with Google (@canonical.com accounts only), load a JSON file, browse questions grouped by section, filter/search results, inline-edit answers, rate answers (1–5 stars), approve answers, attach context source URLs to unanswered questions, assign a team member and a reviewer to each section, share a live-synced session with collaborators, and export results as CSV.
 
 ## Architecture
 
@@ -30,21 +30,25 @@ All app state lives in `components/AppShell.tsx`:
 - `editedAnswers: Record<string, string>` — `item.id → edited text`
 - `ratings: Record<string, number>` — `item.id → 1–5 star rating`
 - `contextUrls: Record<string, string>` — `item.id → URL string` (only on unanswered items)
-- `assignees: Record<string, string>` — `item.id → TeamMember.id` of the assigned team member
-- `reviewers: Record<string, string>` — `item.id → TeamMember.id` of the designated reviewer
+- `approvals: Record<string, true>` — `item.id` of every human-approved answer. Present means approved; there is no `false`, and editing an answer removes its key
+- `sectionAssignees: Record<string, string>` — `SectionInfo.key → TeamMember.id`. **Keyed by section, not by question** — questions are not individually assignable
+- `sectionReviewers: Record<string, string>` — `SectionInfo.key → TeamMember.id`
 - `teamMembers: TeamMember[]` — global team bank, loaded via `subscribeToTeamMembers` (not part of `SessionState`)
-- `filters: Filters` — status/section/search state
-- `sessionId: string | null` — Firebase RTDB session ID if sharing is active
+- `filters: Filters` — status/section/search state. Read through `effectiveFilters`, which drops a person filter whose option has gone rather than showing an empty list
+- `override` / `viewState` — which cards are expanded and which sections are collapsed, per doc. Local view state, **not** synced (see below)
+- `docId: string | null` — the open doc's saved-file id, which doubles as its RTDB session id
 - `darkMode: boolean` — persisted to `localStorage`
 
-State flows down as props; no context or state management library is used. `suppressNextUpdate` ref prevents own-write echo when syncing to Firebase RTDB.
+State flows down as props; no context or state management library is used. There is no echo suppression on RTDB writes: every snapshot is applied, and `sameMap` keeps the no-op echoes from causing renders.
+
+Card expansion and section collapse live in `lib/expansion.ts`, persisted to `localStorage` per `docId` (most-recently-touched-first, capped at 25 docs). Deliberately not synced to the session — it is one reader's view of the doc, and syncing it would let someone's collapse close a card another person was reading.
 
 ### Firebase
 
 - **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com` accounts. Enforced in `signInWithGoogle` by checking `result.user.email`.
-- **Realtime Database** (`lib/session.ts`): Session sharing. `createSession` writes full `SessionState` to `sessions/<uuid>`. `subscribeToSession` subscribes via `onValue`. Granular updates (`updateAnswer`, `updateRating`, `updateContextUrl`, `updateAssignee`, `updateReviewer`, etc.) write only the changed field. Joining a session reads the `?session=<id>` URL param on mount.
+- **Realtime Database** (`lib/session.ts`): Session sharing. A doc's session id **is** its saved-file id, so opening the same doc always lands in the same room. `ensureSession` seeds `sessions/<docId>` in a `runTransaction` and leaves an existing node completely alone. `subscribeToSession` subscribes via `onValue`. Granular updates (`updateAnswer`, `updateRating`, `updateContextUrl`, `updateApproval`, `updateAssignee`, `updateReviewer`, etc.) write only the changed field — the assignment ones take a `SectionInfo.key`, not an `item.id`. Opening a shared link reads the `?doc=<id>` URL param on mount and fetches content from the saved-file bank, not from the room.
 
-Session sharing is one-way initiator: only the file-loader can create a session (ShareButton is hidden when already in a live session). Collaborators join via shared URL and receive all updates in real time.
+`encodeKey`/`decodeKey` escape everything RTDB forbids in a key (`.`, `$`, `#`, `[`, `]`, `/`), with `%` escaped first and unescaped last so the mapping stays reversible. `/` is the one that matters most: RTDB reads it as a path separator and silently nests the value instead of rejecting it, and section keys can come from producer-supplied labels like `"Security/Compliance"`.
 
 ### Team bank
 
@@ -55,19 +59,45 @@ Session sharing is one-way initiator: only the file-loader can create a session 
 - `addTeamMember(name)` — pushes a new entry, returns the generated `memberId`
 - `removeTeamMember(memberId)` — removes the entry from `/teamMembers`
 
-`lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans all sessions under `/sessions` and clears any `assignees`/`reviewers` entries pointing at the removed member, reverting those questions back to "Unassigned". This is called whenever a member is removed from the team bank.
+`lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans all sessions under `/sessions` and clears any `sectionAssignees`/`sectionReviewers` entries pointing at the removed member, reverting those sections back to "Unassigned". This is called whenever a member is removed from the team bank.
 
 ### Key data model
 
-Items have `id` strings in `"section.question"` format (e.g. `"1.2"`, `"3.10"`). Section grouping is derived by splitting on `.` and taking index 0. An answer is considered "unanswered" if it starts with `"The provided context does not contain"` (see `lib/utils.ts:isUnanswered`).
+An answer is considered "unanswered" if it starts with `"The provided context does not contain"` (see `lib/utils.ts:isUnanswered`).
 
-Unanswered items: rating is disabled (shown as greyed stars). Context URL input is only shown for unanswered items.
+Unanswered items: rating is disabled (shown as greyed stars). Context URL input is only shown for unanswered items, keyed off the *original* answer — an edit does not change that.
 
-The JSON input format supports both `"results"` and `"result"` keys (handled in `lib/utils.ts:parseQAFile`).
+The JSON input format supports both `"results"` and `"result"` keys, and an explicit section label under either `section` or rag-cli's `source` (handled in `lib/utils.ts:parseQAFile`). Duplicate ids are de-duplicated there by appending `.1`, `.2`, … — note that this injects a `.` into those ids, which is why `chooseIdDelimiter` tests for a delimiter present in *every* id rather than for a drop in bucket count.
+
+### Approval states
+
+`lib/utils.ts:questionState` is the single definition of a question's state, read by the header chips, the section badges, the card hue and the status filter, so none of them can drift:
+
+- `unanswered` — no answer text and no edit. Cannot be approved.
+- `ready` — there is answer text, but nobody has signed off on it. Every answered question starts here, including one whose text arrived via an edit.
+- `approved` — a human clicked Approve. The only state not derivable from the file.
+
+Editing an answer withdraws its approval (`revokeApprovalForEdit` in `AppShell`): an approval stands for the text that was read, not for the question. "Answered" is gone as a concept — the status filter's third option is `approved`, and the export warns first when anything is still unapproved, because the CSV has no approval column and so reads as signed off.
+
+### Sectioning
+
+`lib/sectioning.ts:resolveSections` decides what a section is, in three tiers:
+
+1. an explicit per-item `section` label
+2. hierarchical ids — the delimiter is chosen from `. - _ : / space`, requiring the delimiter to appear in **every** id and then preferring the fewest buckets
+3. TextTiling-style contiguous topic inference, for files with no section signal at all (flat ids like `1..56`)
+
+Inference is sequential rather than clustered so it is deterministic: collaborators in one live session must derive byte-identical sections from the same file. Every section is capped at `SECTION_CAP` (10) questions, **softly** — a trailing part below 5 folds back into the one before it, so 34 becomes 10/10/14.
+
+Resolve the map **once per file, memoised on `data`** — never over a filtered subset. Boundaries derived from a filtered list would move as the user types, visibly rearranging sections and appearing to move people's assignments. `groupBySection` and `sectionKeyOf` only ever look the map up.
+
+Section keys are the primary key for assignment, and for inferred sections and split parts (`inferred:2`, `3~2`) they are outputs of this file. **Bump `SECTION_ALGO_VERSION` whenever a change there can re-key a section**, including any change to `SECTION_CAP`. The stamp is written into the room at seed and compared on load; a mismatch cannot be repaired, but `reportAlgoMismatch` says so out loud rather than letting the file read as though nobody was ever assigned.
 
 ### Team members & assignment
 
-`TeamMember` (`lib/types.ts`) is `{ id: string, name: string }`, where `id` is the Firebase key under `/teamMembers`. `SessionState` includes `assignees` and `reviewers` maps (`item.id → TeamMember.id`), synced alongside `editedAnswers`/`ratings`/`contextUrls`.
+`TeamMember` (`lib/types.ts`) is `{ id, name, email, photoURL? }`, where `id` is a sanitized email under `/teamMembers`. `SessionState` includes `sectionAssignees` and `sectionReviewers` maps (`SectionInfo.key → TeamMember.id`), synced alongside `editedAnswers`/`ratings`/`contextUrls`/`approvals`.
+
+Assignment is a property of a **section**, not a question: the section header carries one clickable box per role. The older item-keyed `assignees`/`reviewers` RTDB nodes are obsolete and deliberately neither read nor migrated — an item id and a section key can both be `"3"`, so reusing the path would resurrect a question-level assignment onto a section. Pre-existing sessions open with every section unassigned.
 
 ### Export format
 
@@ -80,22 +110,23 @@ page.tsx
 └── AuthGate — Firebase auth state listener
     ├── LoginScreen — Google Sign-In button (shown when unauthenticated)
     └── AppShell (all state) — shown when authenticated
-        ├── Header — sticky bar with logo lockup, dark mode toggle, FileLoader, filename badge, answered/unanswered counts
+        ├── Sidebar — view switcher (inspector/database), dark mode toggle, signed-in email, sign out
+        ├── Header — sticky bar with logo lockup, FileLoader, filename badge, Ready/Approved/Unanswered chips
         │   ├── FileLoader — drag-and-drop or click-to-upload, calls parseQAFile
+        │   ├── ShareButton — copies the ?doc=<id> URL to the clipboard
+        │   ├── ExportButton — warns if anything is unapproved, then downloads CSV (optionally removing the doc from the shared list)
         │   └── [Manage Users panel] — toggled by "Manage Users" button in the header; add/remove team bank members
-        ├── [user bar] — shows signed-in email + sign out button
-        ├── [live session banner] — shown when sessionId is set
-        ├── FilterBar — status toggle, section dropdown, search input
-        └── SectionGroup (per section)
-            │   [assignee/reviewer indicator] — shows assigned name / "Reviewer: <name>" or "Unassigned" on the section header row, looked up from teamMembers via assignees/reviewers
-            └── QuestionCard (per item)
-                ├── CopyButton (inline, for original and edited answers)
-                ├── StarRating — 1–5 stars; disabled for unanswered items
-                ├── AssignmentRow — assignee and reviewer dropdowns, populated from teamMembers
-                └── ContextUrlRow — URL input; only rendered for unanswered items
-        └── [export footer]
-            ├── ShareButton — creates Firebase session, copies URL to clipboard (hidden in live sessions)
-            └── ExportButton — downloads CSV
+        ├── [live session banner] — shown when docId is set
+        ├── FilterBar — status toggle (All/Approved/Unanswered), section dropdown, search input
+        ├── SectionGroup (per section)
+        │   │   [section header] — label, assignee and reviewer boxes (TeamMemberSelect, keyed on SectionInfo.key),
+        │   │                      Questions/Ready/Approved/Unanswered/Edited count badges, collapse toggle
+        │   └── QuestionCard (per item) — box hue is the state readout: red unanswered, blue ready, green approved
+        │       ├── CopyButton (inline, for original and edited answers)
+        │       ├── StarRating — 1–5 stars; disabled for unanswered items
+        │       ├── ContextUrlRow — URL input; only rendered for unanswered items
+        │       └── [Approve button] — in the footer row, disabled for unanswered items
+        └── RfpDatabaseView — mounted on first visit to the database view, then kept mounted
 ```
 
 ### Vanilla Framework & dark mode
@@ -139,12 +170,15 @@ SVGs with a square `viewBox` use `preserveAspectRatio="xMidYMid meet"` by defaul
   border: 1px solid var(--vf-color-border-high-contrast);
   font-size: 0.875rem; white-space: nowrap;
 
-  &--positive { background: var(--vf-color-background-positive-default); border-color: var(--vf-color-border-positive); }
-  &--negative { background: var(--vf-color-background-negative-default); border-color: var(--vf-color-border-negative); }
-  &--caution  { background: var(--vf-color-background-caution-default);  border-color: var(--vf-color-border-caution); }
+  &--positive    { background: var(--vf-color-background-positive-default);    border-color: var(--vf-color-border-positive); }
+  &--negative    { background: var(--vf-color-background-negative-default);    border-color: var(--vf-color-border-negative); }
+  &--caution     { background: var(--vf-color-background-caution-default);     border-color: var(--vf-color-border-caution); }
+  &--information { background: var(--vf-color-background-information-default); border-color: var(--vf-color-border-information); }
 }
 ```
-Use `--positive` (green) for answered/success, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning.
+Use `--positive` (green) for approved/success, `--information` (blue) for ready/in-progress, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning. The same four tints carry the question-card hues (`.question-card--approved` / `--ready` / `--unanswered` / `--edited`), so a card and its section badges always read as the same colour.
+
+**Hiding a collapsed panel.** Use `display: none` (`.section-cards.is-collapsed`), or `visibility: hidden` where an animation has to play out first (`.question-card__body.is-collapsed`, which delays the `visibility` flip by the length of the collapse). Never `max-height: 0` alone — the contents stay in the tab order and the accessibility tree, which is how the Approve button became reachable on a card nobody could see.
 
 **Square buttons** — Vanilla buttons are rounded by default. To make them square like the "Load JSON file" button:
 ```scss

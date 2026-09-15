@@ -1,4 +1,4 @@
-import type { QAFile, QAItem, ParsedQAFile } from "./types";
+import type { QAFile, QAItem, ParsedQAFile, SectionInfo, SectionMap } from "./types";
 
 /** Phrase that marks an answer as "not found in context" */
 const UNANSWERED_PREFIX = "The provided context does not contain";
@@ -7,15 +7,38 @@ export function isUnanswered(answer: string): boolean {
   return answer.trimStart().startsWith(UNANSWERED_PREFIX);
 }
 
-/** Extract section number from an id like "1.2" → "1" */
-export function sectionOf(id: string): string {
-  return id.split(".")[0];
+/**
+ * The three states a question can be in.
+ *
+ * `unanswered` — no answer text to work with. Cannot be approved.
+ * `ready`      — there is answer text, but no human has signed off on it. Every answered question
+ *                starts here, including one whose text arrived via an edit.
+ * `approved`   — a human clicked Approve. The only state that is not derived from the file.
+ */
+export type QuestionState = "unanswered" | "ready" | "approved";
+
+/**
+ * Derive a question's state. The single definition — badges, counters, box hue and the status filter
+ * all read this, so none of them can drift from the others.
+ *
+ * An edit outranks the unanswered prefix, matching the behaviour this replaces: supplying text for a
+ * question the model could not answer makes it answerable, and therefore approvable.
+ */
+export function questionState(
+  answer: string,
+  editedAnswer: string | undefined,
+  approved: boolean
+): QuestionState {
+  if (editedAnswer === undefined && isUnanswered(answer)) return "unanswered";
+  // Defensive: an approval can only be set on text that existed, but a session written by an older
+  // build could hold one for a question that is now unanswered. State ignores it rather than
+  // rendering a green box with nothing in it.
+  return approved ? "approved" : "ready";
 }
 
-/** Get unique sorted section numbers from item list */
-export function getSections(items: QAItem[]): string[] {
-  const set = new Set(items.map((i) => sectionOf(i.id)));
-  return Array.from(set).sort((a, b) => Number(a) - Number(b));
+/** The section key an item belongs to, per the resolved map. */
+export function sectionKeyOf(map: SectionMap, item: QAItem): string {
+  return map.byItemId[item.id] ?? "";
 }
 
 /** Parse and validate uploaded JSON */
@@ -56,7 +79,15 @@ export function parseQAFile(json: unknown): ParsedQAFile {
       idCounts.set(id, count);
       id = `${id}.${count}`;
     }
-    return { id, question: item.question, answer: item.answer };
+    // Keep an explicit section label if the producer sent one, under either name. Without this
+    // the only section signal left is the id, which flat-id files do not carry.
+    const section = item.section ?? item.source;
+    return {
+      id,
+      question: item.question,
+      answer: item.answer,
+      ...(typeof section === "string" && section.trim() ? { section } : {}),
+    };
   });
 
   return { generated_at: obj.generated_at, model: obj.model, items };
@@ -77,17 +108,24 @@ export function formatDate(iso: string): string {
   }
 }
 
-/** Group items by section, returning entries sorted by section number */
+/**
+ * Group items into their resolved sections, in the map's order, dropping sections that no item
+ * survives the current filters in.
+ *
+ * The map is looked up, never recomputed: pass the map resolved once from the full file so the
+ * section a question sits in cannot change as the user filters.
+ */
 export function groupBySection(
-  items: QAItem[]
-): Array<{ section: string; items: QAItem[] }> {
-  const map = new Map<string, QAItem[]>();
+  items: QAItem[],
+  map: SectionMap
+): Array<{ section: SectionInfo; items: QAItem[] }> {
+  const buckets = new Map<string, QAItem[]>();
   for (const item of items) {
-    const sec = sectionOf(item.id);
-    if (!map.has(sec)) map.set(sec, []);
-    map.get(sec)!.push(item);
+    const key = sectionKeyOf(map, item);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(item);
   }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([section, items]) => ({ section, items }));
+  return map.sections
+    .filter((section) => buckets.has(section.key))
+    .map((section) => ({ section, items: buckets.get(section.key)! }));
 }

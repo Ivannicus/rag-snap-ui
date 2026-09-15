@@ -9,6 +9,10 @@ interface Props {
   editedAnswers: Record<string, string>;
   ratings: Record<string, number>;
   contextUrls: Record<string, string>;
+  /** Answered but not signed off. The export reads as a finished document, so these get a warning. */
+  readyCount: number;
+  /** No answer text at all. Also unapproved, and rather more so. */
+  unansweredCount: number;
   sourceFilename: string | null;
   /** Saved-file id. Null when the doc did not come from the shared bank, so there is nothing to remove. */
   docId: string | null;
@@ -43,14 +47,22 @@ function buildCsv(
   return [header.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
 }
 
-/** "closed" is the resting state; the two others are the steps of the export flow. */
-type Stage = "closed" | "choose" | "confirm-remove";
+/**
+ * "closed" is the resting state; the rest are the steps of the export flow.
+ *
+ * "warn-unapproved" sits in front of "choose" and only appears when something is still unapproved.
+ * The CSV carries no approval column — it is written on the assumption that what it contains has
+ * been signed off — so exporting early is the one mistake the format itself cannot record.
+ */
+type Stage = "closed" | "warn-unapproved" | "choose" | "confirm-remove";
 
 export default function ExportButton({
   data,
   editedAnswers,
   ratings,
   contextUrls,
+  readyCount,
+  unansweredCount,
   sourceFilename,
   docId,
   onError,
@@ -62,6 +74,7 @@ export default function ExportButton({
 
   const editCount = Object.keys(editedAnswers).length;
   const ratingCount = Object.keys(ratings).length;
+  const unapprovedCount = readyCount + unansweredCount;
 
   const downloadName = `${
     sourceFilename ? sourceFilename.replace(/\.json$/i, "") : "results"
@@ -155,7 +168,7 @@ export default function ExportButton({
   return (
     <>
       <button
-        onClick={() => setStage("choose")}
+        onClick={() => setStage(unapprovedCount > 0 ? "warn-unapproved" : "choose")}
         className={`u-no-margin--bottom ${exported ? "p-button--positive" : "p-button--brand"}`}
       >
         {exported ? (
@@ -178,6 +191,60 @@ export default function ExportButton({
           </>
         )}
       </button>
+
+      {stage === "warn-unapproved" && (
+        <div
+          className="p-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="export-unapproved-title"
+        >
+          <div className="p-modal__dialog">
+            <header className="p-modal__header">
+              <h2 className="p-modal__title" id="export-unapproved-title">
+                {unapprovedCount} question{unapprovedCount !== 1 ? "s" : ""} not approved yet
+              </h2>
+            </header>
+            <div className="remove-member-modal__body">
+              <i className="p-icon--warning p-icon--large"></i>
+              <div>
+                <p className="u-no-margin--bottom">
+                  <strong>
+                    {data.items.length - unapprovedCount} of {data.items.length} approved
+                  </strong>
+                </p>
+                <p className="u-text--muted p-text--small u-no-margin--bottom">
+                  {[
+                    readyCount > 0 && `${readyCount} awaiting approval`,
+                    unansweredCount > 0 && `${unansweredCount} unanswered`,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+              </div>
+            </div>
+            <p>
+              The CSV does not record approval, so anyone reading it will take every row as signed
+              off. Approve the outstanding questions first, or export anyway if you know that is what
+              you want.
+            </p>
+            <footer className="p-modal__footer">
+              <button
+                className="p-button--base u-no-margin--bottom"
+                onClick={() => setStage("closed")}
+              >
+                Cancel
+              </button>
+              <button
+                className="p-button--negative u-no-margin--bottom"
+                onClick={() => setStage("choose")}
+              >
+                Export anyway
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {stage === "choose" && (
         <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="export-doc-title">
