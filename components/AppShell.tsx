@@ -8,7 +8,8 @@ import RfpDatabaseView from "@/components/RfpDatabaseView";
 import OverviewView from "@/components/OverviewView";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
-import { groupBySection, getSections, isUnanswered } from "@/lib/utils";
+import { groupBySection, questionState, sectionKeyOf } from "@/lib/utils";
+import { resolveSections, SECTION_ALGO_VERSION } from "@/lib/sectioning";
 import {
   ensureSession,
   newSessionState,
@@ -26,6 +27,12 @@ import {
 } from "@/lib/session";
 import { getSavedFile } from "@/lib/savedFiles";
 import { subscribeToTeamMembers } from "@/lib/teamBank";
+import {
+  loadViewState,
+  saveViewState,
+  EMPTY_VIEW_STATE,
+  type DocViewState,
+} from "@/lib/expansion";
 import type {
   ParsedQAFile,
   Filters,
@@ -37,6 +44,30 @@ import type {
 } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
+
+/**
+ * Read `filters.section` as a person filter, or null when it names a section instead.
+ *
+ * The one field carries both kinds of selection: a section key, or "assignee:<memberId>" /
+ * "reviewer:<memberId>". Section keys are not ours to constrain — an explicit label out of the source
+ * file is arbitrary text — so a document with a section literally called "assignee:2" would otherwise
+ * be read as a person filter and never show its own questions. Checking the real keys first means a
+ * section always wins the name it actually has; a person filter only has to avoid colliding with a
+ * section that exists in the file being viewed.
+ */
+function parsePersonFilter(
+  section: string,
+  sectionKeys: Set<string>
+): { roleKind: "assignee" | "reviewer"; memberId: string } | null {
+  if (sectionKeys.has(section)) return null;
+  for (const roleKind of ["assignee", "reviewer"] as const) {
+    const prefix = `${roleKind}:`;
+    if (section.startsWith(prefix)) {
+      return { roleKind, memberId: section.slice(prefix.length) };
+    }
+  }
+  return null;
+}
 
 /**
  * Shallow value equality for the overlay maps.
@@ -87,9 +118,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [contextUrls, setContextUrls] = useState<Record<string, string>>(
     () => initialState?.contextUrls ?? {}
   );
+  // item.id -> "approved". Present means approved; there is no other member, so an absent id is
+  // "ready" when the answer has text and "unanswered" when it does not.
   const [itemStatus, setItemStatus] = useState<Record<string, ItemStatus>>(
     () => initialState?.itemStatus ?? {}
   );
+  // Keyed by section, not by question — questions are not individually assignable.
   const [sectionAssignees, setSectionAssignees] = useState<Record<string, string>>(
     () => initialState?.sectionAssignees ?? {}
   );
@@ -102,6 +136,16 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     () => initialState?.projectAssignees ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  // Which cards are expanded and which sections are collapsed. Held here rather than inside each
+  // card or section so it survives the remount a doc switch or a filter change causes, and so it
+  // can be restored for the doc being opened.
+  //
+  // Held as the doc it belongs to plus its state, so a stale entry cannot be applied to the wrong
+  // doc: a switch renders with `override.docId` still pointing at the previous doc, and the value
+  // below falls back to the incoming doc's stored view for that render.
+  const [override, setOverride] = useState<{ docId: string | null; state: DocViewState } | null>(
+    null
+  );
   // A doc's session id is its saved-file id, so this doubles as session identity: opening the same
   // doc always joins the same room instead of minting a new random session.
   const [docId, setDocId] = useState<string | null>(null);
@@ -144,6 +188,70 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     docIdRef.current = docId;
   }, [docId]);
 
+  // Mirrors `itemStatus` for the edit handlers, which need to know whether a question was approved
+  // before its answer changed without taking a render to find out. Kept in step by every writer
+  // below and by the remote-snapshot effect.
+  const itemStatusRef = useRef<Record<string, ItemStatus>>({});
+  useEffect(() => {
+    itemStatusRef.current = itemStatus;
+  }, [itemStatus]);
+
+  // How this doc was last left, read back from localStorage. Derived rather than restored through an
+  // effect: a doc switch has the incoming doc's view ready in the same render that changes `docId`,
+  // so there is no frame showing the outgoing doc's open cards and no state to keep in step.
+  const storedViewState = useMemo(
+    () => (docId ? loadViewState(docId) : EMPTY_VIEW_STATE),
+    [docId]
+  );
+
+  // What is actually open: this session's toggles if they belong to the doc on screen, else what was
+  // stored for it. Closing a doc goes back to the defaults, since `loadViewState` is not consulted
+  // without an id.
+  const viewState = override?.docId === docId ? override.state : storedViewState;
+
+  /**
+   * Record a change to what is open.
+   *
+   * Persisted per doc on every change rather than on unload — there is no reliable moment to save on
+   * the way out of a static page, and the writes are one small key each.
+   */
+  const commitViewState = useCallback(
+    (next: DocViewState) => {
+      setOverride({ docId, state: next });
+      // No doc id means the postMessage import path, which has no identity to file this under. The
+      // toggles still work for the visit, they just are not remembered.
+      if (docId) saveViewState(docId, next);
+    },
+    [docId]
+  );
+
+  /** Open or close one card. */
+  const handleSetExpanded = useCallback(
+    (id: string, open: boolean) => {
+      const expandedQuestions = { ...viewState.expandedQuestions };
+      if (open) expandedQuestions[id] = true;
+      else delete expandedQuestions[id];
+      commitViewState({ ...viewState, expandedQuestions });
+    },
+    [commitViewState, viewState]
+  );
+
+  /**
+   * Show or hide one section's questions.
+   *
+   * Only the section's own key moves. The cards' expansion is a separate set, so collapsing a
+   * section hides whatever was open inside it and expanding it again brings that back unchanged.
+   */
+  const handleSetSectionOpen = useCallback(
+    (sectionKey: string, open: boolean) => {
+      const collapsedSections = { ...viewState.collapsedSections };
+      if (open) delete collapsedSections[sectionKey];
+      else collapsedSections[sectionKey] = true;
+      commitViewState({ ...viewState, collapsedSections });
+    },
+    [commitViewState, viewState]
+  );
+
   // Per-view scroll position, restored when switching back
   const scrollPositions = useRef<Record<ActiveView, number>>({
     overview: 0,
@@ -161,17 +269,17 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       // Re-read the project list on each arrival, so the dashboard is never showing a list from
       // before the file that was just loaded, exported or removed.
       if (view === "overview") setOverviewRefreshKey((key) => key + 1);
+      // Mount each secondary view on first visit, then keep it mounted (never unmount again), so its
+      // subscriptions and scroll position survive switching away. Latched here rather than in an
+      // effect on `activeView`: this is the only route to either view — the `?doc=` link goes to the
+      // inspector, which is always mounted — so an effect was a second render's worth of work to
+      // learn what this call already knows.
+      if (view === "database") setHasVisitedDatabase(true);
+      if (view === "overview") setHasVisitedOverview(true);
       setActiveView(view);
     },
     [activeView]
   );
-
-  // Mount each secondary view on first visit, then keep it mounted (never unmount again), so its
-  // subscriptions and scroll position survive switching away.
-  useEffect(() => {
-    if (activeView === "database") setHasVisitedDatabase(true);
-    if (activeView === "overview") setHasVisitedOverview(true);
-  }, [activeView]);
 
   // Restore the new view's scroll position after the DOM updates, before paint
   useLayoutEffect(() => {
@@ -185,9 +293,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     else root.classList.remove("is-dark");
   }, [darkMode]);
 
-  // Load persisted dark mode preference
+  // Load the persisted dark mode preference. It cannot be read in the initial state: this page is
+  // prerendered as static HTML, so the first client render has to match markup produced without a
+  // localStorage to consult. That makes this the one legitimate synchronous setState on mount.
   useEffect(() => {
     const stored = localStorage.getItem("darkMode");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-safe read of a stored preference
     if (stored === "true") setDarkMode(true);
   }, []);
 
@@ -238,6 +349,47 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   );
 
   /**
+   * Say so when a room's assignment was keyed under different sectioning rules than this build uses.
+   *
+   * Section keys are algorithm output, so a room seeded by another version keys its assignees and
+   * reviewers to sections this build does not produce. Nothing here can repair that — the sections
+   * those names were put against no longer exist — but the alternative is a file that reads as though
+   * nobody was ever assigned to anything, which is the wrong thing for someone to conclude.
+   *
+   * Two ways a room can be in this state, and the second is the one that actually reaches users:
+   *
+   *  - It was seeded under a different SECTION_ALGO_VERSION, and still holds section-keyed assignment
+   *    that no longer matches any section.
+   *  - It predates the move from per-question to per-section assignment, so it holds the obsolete
+   *    item-keyed nodes this build does not read. Those rooms carry no version stamp at all — it
+   *    postdates them — so the version check alone would let the most common case through silently.
+   *
+   * Only worth saying when there is assignment to lose, and only once per room.
+   */
+  const mismatchWarnedFor = useRef<string | null>(null);
+  const reportAlgoMismatch = useCallback(
+    (state: SessionState) => {
+      const { sectionAlgoVersion: stored } = state;
+      const staleKeys =
+        // Undefined means the room predates the stamp, which on its own is not evidence of a
+        // mismatch: an unstamped room may well have been seeded by these very rules.
+        stored !== undefined &&
+        stored !== SECTION_ALGO_VERSION &&
+        (Object.keys(state.sectionAssignees).length > 0 ||
+          Object.keys(state.sectionReviewers).length > 0);
+      if (!staleKeys && state.hasLegacyItemAssignment !== true) return;
+      const room = docIdRef.current;
+      if (mismatchWarnedFor.current === room) return;
+      mismatchWarnedFor.current = room;
+      showError(
+        "Section assignments could not be matched up",
+        "This file was shared using an older version of the app, which recorded assignments against a different breakdown of the questions. The assignees and reviewers saved then do not line up with the sections shown here, so every section starts unassigned. Assign them again to bring this file up to date."
+      );
+    },
+    [showError]
+  );
+
+  /**
    * Apply a remote snapshot.
    *
    * There is no echo suppression: every snapshot is applied, including the echo of our own write.
@@ -266,7 +418,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setProjectAssignees((prev) =>
       sameMap(prev, state.projectAssignees) ? prev : state.projectAssignees
     );
-  }, []);
+    reportAlgoMismatch(state);
+  }, [reportAlgoMismatch]);
 
   // One listener per doc. Keying the effect on docId makes React tear the previous listener down
   // before attaching the next one, so a doc switch cannot leave the old room subscribed. The
@@ -306,6 +459,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setRatings({});
     setContextUrls({});
     setItemStatus({});
+    itemStatusRef.current = {};
     setSectionAssignees({});
     setSectionReviewers({});
     setProjectAssignees({});
@@ -365,11 +519,15 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * of what it adds is wanted here anyway: there is no scroll position to save at mount, and no
    * project list to refresh on the way out of a dashboard nobody has looked at.
    */
+  // The "loading" state cannot be the initial one: this page is prerendered as static HTML, so the
+  // first client render has to match markup produced without a URL to read. Announcing the fetch is
+  // therefore the second render either way.
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("doc");
     if (!id) return;
 
     let active = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-safe read of the address bar
     setSharedDocState("loading");
     setActiveView("inspector");
 
@@ -475,10 +633,57 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     writeToSession((sid) => clearRating(sid, id));
   }, [writeToSession]);
 
+  /**
+   * Set or clear one question's approval.
+   *
+   * Approving is a collaborative act, so it goes to the room like an edit does — everyone in the
+   * session sees the box turn green. Who *may* approve is decided in `SectionGroup`, from the section's
+   * reviewer; withdrawing is deliberately open to anyone, so a stale approval never waits on one person.
+   */
+  const setApprovedState = useCallback(
+    (id: string, approved: boolean) => {
+      const next = { ...itemStatusRef.current };
+      if (approved) next[id] = "approved";
+      else delete next[id];
+      itemStatusRef.current = next;
+      setItemStatus(next);
+      writeToSession((sid) =>
+        approved ? updateItemStatus(sid, id, "approved") : clearItemStatus(sid, id)
+      );
+    },
+    [writeToSession]
+  );
+
+  const handleApprove = useCallback((id: string) => setApprovedState(id, true), [setApprovedState]);
+  const handleUnapprove = useCallback(
+    (id: string) => setApprovedState(id, false),
+    [setApprovedState]
+  );
+
+  /**
+   * Withdraw an approval because the answer text changed under it.
+   *
+   * An approval means a human read *that text* and signed off on it, so any change to the effective
+   * answer — saving an edit, or reverting one — sends the question back to Ready for a fresh look.
+   * Silent about it when the question was not approved, which is the common case.
+   *
+   * The card also *refuses* to edit an approved answer, which is the primary guard and the one a reader
+   * sees. This stays as the backstop: it is what keeps the invariant if an edit reaches the state by any
+   * other route, and it costs nothing on the overwhelmingly common unapproved path.
+   */
+  const revokeApprovalForEdit = useCallback(
+    (id: string) => {
+      if (!itemStatusRef.current[id]) return;
+      setApprovedState(id, false);
+    },
+    [setApprovedState]
+  );
+
   const handleSaveEdit = useCallback((id: string, answer: string) => {
     setEditedAnswers((prev) => ({ ...prev, [id]: answer }));
     writeToSession((sid) => updateAnswer(sid, id, answer));
-  }, [writeToSession]);
+    revokeApprovalForEdit(id);
+  }, [writeToSession, revokeApprovalForEdit]);
 
   const handleClearEdit = useCallback((id: string) => {
     setEditedAnswers((prev) => {
@@ -486,23 +691,12 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       delete next[id];
       return next;
     });
+    revokeApprovalForEdit(id);
     writeToSession((sid) => clearAnswer(sid, id));
-  }, [writeToSession]);
+  }, [writeToSession, revokeApprovalForEdit]);
 
-  const handleApprove = useCallback((id: string) => {
-    setItemStatus((prev) => ({ ...prev, [id]: "approved" }));
-    writeToSession((sid) => updateItemStatus(sid, id, "approved"));
-  }, [writeToSession]);
-
-  const handleUnapprove = useCallback((id: string) => {
-    setItemStatus((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    writeToSession((sid) => clearItemStatus(sid, id));
-  }, [writeToSession]);
-
+  // All four take a SectionInfo.key. Assignment is a property of a section, so there is no
+  // per-question path into these any more.
   const handleSaveSectionAssignee = useCallback((sectionKey: string, memberId: string) => {
     setSectionAssignees((prev) => ({ ...prev, [sectionKey]: memberId }));
     writeToSession((sid) => updateSectionAssignee(sid, sectionKey, memberId));
@@ -576,19 +770,32 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     [handleLoad, handleChangeView, showError]
   );
 
-  const unansweredCount = useMemo(
-    () =>
-      data
-        ? data.items.filter(
-            (i) => isUnanswered(i.answer) && !editedAnswers[i.id]
-          ).length
-        : 0,
-    [data, editedAnswers]
+  /** The three tallies the top bar reports, counted once over the whole file. */
+  const stateCounts = useMemo(() => {
+    const counts = { unanswered: 0, ready: 0, approved: 0 };
+    for (const item of data?.items ?? []) {
+      counts[
+        questionState(item.answer, editedAnswers[item.id], itemStatus[item.id] === "approved")
+      ]++;
+    }
+    return counts;
+  }, [data, editedAnswers, itemStatus]);
+
+  /**
+   * Sections are resolved once per file, from the *full* item list.
+   *
+   * Deliberately memoised on `data` alone. Resolving over filteredItems would let topic
+   * inference redraw its boundaries on every keystroke in the search box, rearranging sections
+   * under the user and appearing to move assignments between them.
+   */
+  const sectionMap = useMemo(
+    () => resolveSections(data?.items ?? []),
+    [data]
   );
 
-  const allSections = useMemo(
-    () => (data ? getSections(data.items) : []),
-    [data]
+  const sectionKeys = useMemo(
+    () => new Set(sectionMap.sections.map((s) => s.key)),
+    [sectionMap]
   );
 
   // Per-person filter options, computed dynamically from who actually owns or reviews a section of
@@ -597,12 +804,23 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const personFilterOptions = useMemo((): PersonFilterOption[] => {
     if (!data) return [];
 
+    // Walks sections rather than items: a role map is keyed by section now, so an entry for a
+    // section the current file does not contain must not raise a filter option.
+    function distinctMemberIds(roleMap: Record<string, string>): Set<string> {
+      const ids = new Set<string>();
+      for (const section of sectionMap.sections) {
+        const id = roleMap[section.key];
+        if (id) ids.add(id);
+      }
+      return ids;
+    }
+
     function toOptions(
-      roleMap: Record<string, string>,
+      ids: Set<string>,
       prefix: string,
       suffix: string
     ): PersonFilterOption[] {
-      return Array.from(new Set(Object.values(roleMap)))
+      return Array.from(ids)
         .map((id) => teamMembers.find((m) => m.id === id))
         .filter((m): m is TeamMember => m !== undefined)
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -610,49 +828,60 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     }
 
     return [
-      ...toOptions(sectionAssignees, "assignee", "Sections"),
-      ...toOptions(sectionReviewers, "reviewer", "Reviews"),
+      ...toOptions(distinctMemberIds(sectionAssignees), "assignee", "Sections"),
+      ...toOptions(distinctMemberIds(sectionReviewers), "reviewer", "Reviews"),
     ];
-  }, [data, sectionAssignees, sectionReviewers, teamMembers]);
+  }, [data, sectionAssignees, sectionReviewers, teamMembers, sectionMap]);
 
-  // If the active person-filter's option disappears (e.g. their last assignment
-  // was cleared), fall back to "All sections" rather than silently showing nothing.
-  useEffect(() => {
+  /**
+   * The filters actually in force.
+   *
+   * A person filter whose option has gone — their last assignment was cleared, or they were removed
+   * from the team bank — falls back to "All sections" rather than silently showing nothing. Derived
+   * rather than written back into `filters`: correcting it through an effect meant a render where the
+   * list really was empty, and the dropdown had to be told twice what it was already showing.
+   */
+  const effectiveFilters = useMemo((): Filters => {
     const { section } = filters;
-    if (!section.startsWith("assignee:") && !section.startsWith("reviewer:")) return;
-    const stillValid = personFilterOptions.some((opt) => opt.value === section);
-    if (!stillValid) {
-      setFilters((prev) => ({ ...prev, section: "" }));
-    }
-  }, [personFilterOptions, filters.section]);
+    if (parsePersonFilter(section, sectionKeys) === null) return filters;
+    if (personFilterOptions.some((opt) => opt.value === section)) return filters;
+    return { ...filters, section: "" };
+  }, [filters, personFilterOptions, sectionKeys]);
 
   const filteredItems = useMemo((): QAItem[] => {
     if (!data) return [];
-    const { status, section, search } = filters;
+    const { status, section, search } = effectiveFilters;
     const term = search.toLowerCase();
 
     // The person filter selects whole sections, so the matching set is read straight off the
     // section-keyed maps rather than reconstructed from which items a member happened to hold.
     let matchingSections: Set<string> | null = null;
-    if (section.startsWith("assignee:") || section.startsWith("reviewer:")) {
-      const [kind, memberId] = section.split(":", 2);
-      const roleMap = kind === "assignee" ? sectionAssignees : sectionReviewers;
+    const person = parsePersonFilter(section, sectionKeys);
+    if (person) {
+      const roleMap =
+        person.roleKind === "assignee" ? sectionAssignees : sectionReviewers;
       matchingSections = new Set(
-        Object.entries(roleMap)
-          .filter(([, id]) => id === memberId)
-          .map(([sectionKey]) => sectionKey)
+        sectionMap.sections
+          .filter((sec) => roleMap[sec.key] === person.memberId)
+          .map((sec) => sec.key)
       );
     }
 
     return data.items.filter((item) => {
       const effectiveAnswer = editedAnswers[item.id] ?? item.answer;
-      const effectivelyUnanswered =
-        isUnanswered(item.answer) && !editedAnswers[item.id];
-      if (status === "answered" && effectivelyUnanswered) return false;
-      if (status === "unanswered" && !effectivelyUnanswered) return false;
+      // "Approved" is a human sign-off now, not "the model answered it", so this filter no longer
+      // matches a question just because it has answer text. Ready questions are reachable through
+      // "All".
+      const state = questionState(
+        item.answer,
+        editedAnswers[item.id],
+        itemStatus[item.id] === "approved"
+      );
+      if (status === "approved" && state !== "approved") return false;
+      if (status === "unanswered" && state !== "unanswered") return false;
       if (matchingSections) {
-        if (!matchingSections.has(item.id.split(".")[0])) return false;
-      } else if (section && item.id.split(".")[0] !== section) {
+        if (!matchingSections.has(sectionKeyOf(sectionMap, item))) return false;
+      } else if (section && sectionKeyOf(sectionMap, item) !== section) {
         return false;
       }
       if (term) {
@@ -662,9 +891,21 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
       }
       return true;
     });
-  }, [data, filters, editedAnswers, sectionAssignees, sectionReviewers]);
+  }, [
+    data,
+    effectiveFilters,
+    editedAnswers,
+    itemStatus,
+    sectionAssignees,
+    sectionReviewers,
+    sectionMap,
+    sectionKeys,
+  ]);
 
-  const grouped = useMemo(() => groupBySection(filteredItems), [filteredItems]);
+  const grouped = useMemo(
+    () => groupBySection(filteredItems, sectionMap),
+    [filteredItems, sectionMap]
+  );
 
   return (
     <div className="app-shell">
@@ -685,7 +926,9 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           <Header
             data={data}
             filename={filename}
-            unansweredCount={unansweredCount}
+            readyCount={stateCounts.ready}
+            approvedCount={stateCounts.approved}
+            unansweredCount={stateCounts.unanswered}
             totalCount={data?.items.length ?? 0}
             onLoad={handleLoad}
             teamMembers={teamMembers}
@@ -723,9 +966,11 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
 
           {data ? (
             <>
+              {/* The effective filters, so a person filter that fell away shows as "All sections"
+                  rather than as an option the dropdown no longer has. */}
               <FilterBar
-                filters={filters}
-                sections={allSections}
+                filters={effectiveFilters}
+                sections={sectionMap.sections}
                 personFilterOptions={personFilterOptions}
                 onChange={setFilters}
                 resultCount={filteredItems.length}
@@ -746,12 +991,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                   </div>
                 ) : (
                   <div className="section-groups">
-                    {grouped.map(({ section, items }) => (
+                    {grouped.map(({ section, items }, sectionIndex) => (
                       <SectionGroup
-                        key={section}
+                        key={section.key}
                         section={section}
+                        // Position in the rendered list, used only to mint a DOM id for the
+                        // section's panel. Section keys cannot do that job: they carry spaces and
+                        // punctuation, and squeezing those out collides ("A/B" and "A B" both
+                        // become "A-B"), which would point one header's aria-controls at another
+                        // section's questions.
+                        index={sectionIndex}
                         items={items}
-                        searchTerm={filters.search}
+                        searchTerm={effectiveFilters.search}
                         editedAnswers={editedAnswers}
                         onSaveEdit={handleSaveEdit}
                         onClearEdit={handleClearEdit}
@@ -762,10 +1013,14 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
                         itemStatus={itemStatus}
                         onApprove={handleApprove}
                         onUnapprove={handleUnapprove}
-                        sectionAssignee={sectionAssignees[section]}
+                        expandedIds={viewState.expandedQuestions}
+                        onSetExpanded={handleSetExpanded}
+                        open={viewState.collapsedSections[section.key] !== true}
+                        onSetOpen={handleSetSectionOpen}
+                        sectionAssignee={sectionAssignees[section.key]}
                         onSaveSectionAssignee={handleSaveSectionAssignee}
                         onClearSectionAssignee={handleClearSectionAssignee}
-                        sectionReviewer={sectionReviewers[section]}
+                        sectionReviewer={sectionReviewers[section.key]}
                         onSaveSectionReviewer={handleSaveSectionReviewer}
                         onClearSectionReviewer={handleClearSectionReviewer}
                         myMemberId={me?.id}

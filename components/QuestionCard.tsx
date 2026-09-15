@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { isUnanswered } from "@/lib/utils";
+import { isUnanswered, questionState } from "@/lib/utils";
 import type { QAItem } from "@/lib/types";
 
 interface Props {
@@ -27,6 +27,9 @@ interface Props {
   approveDisabledReason?: string;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
+  /** Expansion is owned by AppShell, so it outlives this card's mount and is remembered per doc. */
+  open: boolean;
+  onSetOpen: (id: string, open: boolean) => void;
 }
 
 /** Highlight search term occurrences in text */
@@ -143,35 +146,43 @@ export default function QuestionCard({
   approveDisabledReason,
   onApprove,
   onUnapprove,
+  open,
+  onSetOpen,
 }: Props) {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editingRequested, setEditingRequested] = useState(false);
   const [draft, setDraft] = useState("");
-  const [confirmingRevert, setConfirmingRevert] = useState(false);
+  const [revertRequested, setRevertRequested] = useState(false);
   const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
 
   const unanswered = isUnanswered(item.answer);
   const hasEdit = editedAnswer !== undefined;
+  const state = questionState(item.answer, editedAnswer, approved);
 
   /**
    * An approved answer is frozen: sign-off is on the exact text that was signed off on, so editing it
    * afterwards would leave an approval standing over words the reviewer never read. Withdraw first.
    *
-   * Approval arrives over the live session too, so the editor has to close on someone *else's*
-   * approval and not just refuse to open — see the effect below.
+   * Approval arrives over the live session too, so it is not enough to refuse to *open* the editor —
+   * someone else can approve while this card is mid-edit. Derived rather than closed in an effect on
+   * `approved`: an effect would take a second render to put the editor away, and for that render an
+   * approved answer would still be sitting in an open textarea. `approved` simply wins here.
    */
-  useEffect(() => {
-    if (approved) {
-      setEditing(false);
-      setConfirmingRevert(false);
-    }
-  }, [approved]);
+  const editing = editingRequested && !approved;
+  const confirmingRevert = revertRequested && !approved;
+
+  function setEditing(next: boolean) {
+    setEditingRequested(next);
+  }
+
+  function setConfirmingRevert(next: boolean) {
+    setRevertRequested(next);
+  }
 
   function startEdit() {
     if (approved) return;
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
-    setOpen(true);
+    onSetOpen(item.id, true);
   }
 
   function saveEdit() {
@@ -199,23 +210,16 @@ export default function QuestionCard({
   return (
     <>
     <div
-      className={`p-card question-card ${
-        // Same precedence the status derivation uses, so a card's colour and the band it counts
-        // towards on the dashboard can never disagree. `ready` is last because it is the fallback —
-        // anything neither approved nor still blank is awaiting review — and it used to be styled as
-        // nothing at all, which left the most common state as the only one with no colour.
-        approved
-          ? "question-card--approved"
-          : unanswered && !hasEdit
-          ? "question-card--unanswered"
-          : hasEdit
-          ? "question-card--edited"
-          : "question-card--ready"
+      // Hue comes from `questionState`, the one definition of a question's state, so a card's colour
+      // and the band it counts towards on the dashboard cannot disagree. `--edited` is additive rather
+      // than a fourth state: an edit is a fact about a `ready` answer, not a replacement for it.
+      className={`p-card question-card question-card--${state}${
+        state === "ready" && hasEdit ? " question-card--edited" : ""
       }`}
     >
       {/* Question row — clickable to expand */}
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => onSetOpen(item.id, !open)}
         className="question-card__header"
       >
         {/* ID badge */}

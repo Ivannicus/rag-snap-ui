@@ -72,7 +72,7 @@ export default function OverviewView({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // Owners staged in the bulk bar, applied to the whole selection on Assign rather than on each pick.
-  const [bulkOwnerIds, setBulkOwnerIds] = useState<string[]>([]);
+  const [stagedOwnerIds, setStagedOwnerIds] = useState<string[]>([]);
 
   // ── View mode ──
   //
@@ -80,6 +80,7 @@ export default function OverviewView({
   // an initial value taken from `localStorage` would not match the prerendered HTML. Same reason
   // `AppShell` loads the dark-mode preference in an effect.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-safe read of a stored preference
     if (localStorage.getItem(VIEW_MODE_KEY) === "list") setViewMode("list");
   }, []);
 
@@ -91,11 +92,14 @@ export default function OverviewView({
   // ── Project list and archive: one-shot, re-read whenever the dashboard is shown ──
   useEffect(() => {
     let active = true;
-    setLoadError(null);
 
     listProjectMetas()
       .then((next) => {
-        if (active) setMetas(next);
+        if (!active) return;
+        setMetas(next);
+        // Cleared on success rather than eagerly at the top of the effect. A previous failure's
+        // message stays up while the retry is in flight, which is when it is still true.
+        setLoadError(null);
       })
       .catch(() => {
         if (!active) return;
@@ -103,7 +107,9 @@ export default function OverviewView({
         setLoadError("The project list could not be loaded. Check your connection and try again.");
       });
 
-    setArchiveLoading(true);
+    // No eager `setArchiveLoading(true)` here: it starts true, and each fetch settles it. On a refresh
+    // the list that is already up stays up until the new one lands, rather than flashing a spinner over
+    // data that is about to be replaced by the same data.
     listArchivedProjects()
       .then((next) => {
         if (!active) return;
@@ -133,7 +139,10 @@ export default function OverviewView({
 
   useEffect(() => {
     if (projectIds.length === 0) return;
-    const unsubscribes = projectIds.map((id) =>
+    // Captured for the cleanup below, which must prune exactly the ids this run subscribed to rather
+    // than whatever `projectIds` has become by the time it runs.
+    const ids = projectIds;
+    const unsubscribes = ids.map((id) =>
       subscribeToProjectOverlays(id, (overlays) => {
         setOverlaysById((prev) => {
           const existing = prev[id];
@@ -142,19 +151,22 @@ export default function OverviewView({
         });
       })
     );
-    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+      // Drop the cached overlays for the set of projects this teardown covers, so a project that has
+      // been removed does not keep its entry for the life of the session. Done here, on the way out,
+      // rather than in an effect body that re-derives the same thing from `projectIds`: nothing reads
+      // a stale entry either way — `projects` is built from `metas` and falls back to
+      // `EMPTY_OVERLAYS` — so this is about not holding the memory, and teardown is when that is known.
+      const covered = new Set(ids);
+      setOverlaysById((prev) => {
+        const kept = Object.keys(prev).filter((id) => covered.has(id));
+        if (kept.length === Object.keys(prev).length) return prev;
+        return Object.fromEntries(kept.map((id) => [id, prev[id]]));
+      });
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectIdKey]);
-
-  // Drop overlays for projects that are no longer listed, so a removed project cannot keep feeding
-  // stale counts into the summary strip.
-  useEffect(() => {
-    setOverlaysById((prev) => {
-      const kept = Object.keys(prev).filter((id) => projectIds.includes(id));
-      if (kept.length === Object.keys(prev).length) return prev;
-      return Object.fromEntries(kept.map((id) => [id, prev[id]]));
-    });
-  }, [projectIdKey, projectIds]);
 
   const projects = useMemo((): ProjectSummary[] => {
     return (metas ?? []).map((meta) => {
@@ -183,16 +195,22 @@ export default function OverviewView({
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [projects, teamMembers]);
 
-  // If the filtered owner stops owning anything, fall back to all rather than showing an empty grid
-  // with no explanation — same fallback the inspector's person filter uses.
-  useEffect(() => {
-    if (!ownerFilter) return;
-    if (!ownerOptions.some((m) => m.id === ownerFilter)) setOwnerFilter("");
-  }, [ownerOptions, ownerFilter]);
+  /**
+   * The owner filter actually in force.
+   *
+   * If the filtered owner stops owning anything, this falls back to all rather than showing an empty
+   * grid with no explanation — the same fallback, and the same shape, as the inspector's
+   * `effectiveFilters`. Derived rather than corrected in an effect: an effect renders the empty grid
+   * once before clearing it, which is the very thing the fallback exists to avoid.
+   */
+  const effectiveOwnerFilter = useMemo(
+    () => (ownerFilter && ownerOptions.some((m) => m.id === ownerFilter) ? ownerFilter : ""),
+    [ownerFilter, ownerOptions]
+  );
 
   const visibleProjects = useMemo(() => {
     const filtered = projects.filter(({ meta, overlays, stats }) => {
-      if (ownerFilter && !ownerIdsOf(overlays).includes(ownerFilter)) return false;
+      if (effectiveOwnerFilter && !ownerIdsOf(overlays).includes(effectiveOwnerFilter)) return false;
       if (statusFilter === "complete" && !stats.complete) return false;
       if (statusFilter === "in-progress" && stats.complete) return false;
       if (statusFilter === "overdue" && !isOverdue(meta, stats)) return false;
@@ -223,7 +241,7 @@ export default function OverviewView({
       }
     });
     return sorted;
-  }, [projects, ownerFilter, statusFilter, sortKey]);
+  }, [projects, effectiveOwnerFilter, statusFilter, sortKey]);
 
   // Selection is kept as ids, so it survives a re-read of the project list — but a project that has
   // been filtered out of view must not stay silently selected and then get bulk-assigned.
@@ -278,6 +296,18 @@ export default function OverviewView({
   );
 
   /**
+   * The staged owners actually in play.
+   *
+   * Gated on the selection so an abandoned batch cannot come back: the bar unmounts when the selection
+   * empties, and without this the names staged for it would still be here the next time it appeared.
+   * Derived rather than cleared in an effect, which would render the stale names once on the way past.
+   */
+  const bulkOwnerIds = useMemo(
+    () => (effectiveSelection.length > 0 ? stagedOwnerIds : []),
+    [effectiveSelection.length, stagedOwnerIds]
+  );
+
+  /**
    * Add the staged owners to every selected project, leaving the owners each already has in place.
    *
    * Staged rather than applied per pick, because applying on each `onChange` ended the interaction
@@ -295,15 +325,9 @@ export default function OverviewView({
         reportWriteFailure("Bulk assignment")
       );
     }
-    setBulkOwnerIds([]);
+    setStagedOwnerIds([]);
     setSelectedIds([]);
   }, [bulkOwnerIds, effectiveSelection, overlaysById, reportWriteFailure]);
-
-  // Staged owners are dropped when the selection empties, so the bar never comes back pre-filled with
-  // names left over from a batch that was already applied or abandoned.
-  useEffect(() => {
-    if (effectiveSelection.length === 0 && bulkOwnerIds.length > 0) setBulkOwnerIds([]);
-  }, [effectiveSelection.length, bulkOwnerIds.length]);
 
   // ── Render ──
 
@@ -383,7 +407,7 @@ export default function OverviewView({
             <label className="overview__control">
               <span className="u-text--muted p-text--small">Owner</span>
               <select
-                value={ownerFilter}
+                value={effectiveOwnerFilter}
                 onChange={(e) => setOwnerFilter(e.target.value)}
                 className="u-no-margin--bottom"
               >
@@ -464,7 +488,7 @@ export default function OverviewView({
                 label=""
                 value={bulkOwnerIds}
                 teamMembers={teamMembers}
-                onChange={setBulkOwnerIds}
+                onChange={setStagedOwnerIds}
                 emptyLabel="Add owners to selected"
               />
               <button

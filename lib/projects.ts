@@ -80,7 +80,6 @@ export function subscribeToProjectOverlays(
       // decoding. Every other map is keyed by an item or section id and does.
       const decoded = key === 'projectAssignees' ? val : decodeKeys(val);
       if (sameMap(current[key] as Record<string, unknown>, decoded)) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (current as any)[key] = decoded;
       onUpdate({ ...current });
     })

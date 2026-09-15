@@ -92,18 +92,19 @@ export default function TeamMemberSelect({
 
   return (
     <div className="team-member-select" ref={wrapperRef}>
-      {/* Gated, not always rendered: `p-text--small` extends Vanilla's `%small-text`, which carries a
-          0.95rem bottom margin. An empty span still claims that margin, and in this column flex it
-          pushed the trigger out of any fixed-height container the select was dropped into. */}
-      {label && <span className="u-text--muted p-text--small">{label}</span>}
+      {/* The label sits inside the button so the whole box is the click target, not just the name.
+          A bare <button> is used rather than p-button--base, whose own padding, border radius and
+          hover colours would fight the square section-header box styling. */}
       <button
         ref={buttonRef}
         type="button"
         onClick={handleToggleOpen}
-        aria-pressed={open}
-        className="team-member-select__trigger p-button--base is-dense u-no-margin--bottom"
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="team-member-select__trigger u-no-margin--bottom"
       >
-        {selected && <TeamMemberAvatar member={selected} />}
+        <span className="team-member-select__label">{label}</span>
+        {selected && <TeamMemberAvatar member={selected} size="small" />}
         <span className="team-member-select__trigger-label">
           {selected ? selected.name : "Unassigned"}
         </span>

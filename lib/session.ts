@@ -1,21 +1,39 @@
 import { ref, update, remove, onValue, get, runTransaction } from 'firebase/database';
 import { db } from './firebase';
+import { SECTION_ALGO_VERSION } from './sectioning';
 import type { ItemStatus, ParsedQAFile, SessionState } from './types';
 
 /**
- * Firebase RTDB forbids "." in keys. Encode/decode so item IDs like "1.1" survive round-trips.
+ * Firebase RTDB forbids ".", "$", "#", "[", "]" and "/" in keys.
  *
- * Exported because section keys are derived from item ids (`sectionOf` splits on ".") and so carry
- * the same restriction, and because the dashboard reads these maps through its own module. One
- * codec for every key under a session node — a second, parallel implementation is how the two halves
- * of a map end up disagreeing about what a key is called.
+ * Item IDs like "1.1" and section keys taken from producer-supplied labels ("Security/Compliance")
+ * can contain any of them, and an unescaped "/" is the dangerous one: RTDB reads it as a path
+ * separator and silently nests the value instead of rejecting it. "%" is escaped first and unescaped
+ * last so the mapping is reversible even for a key that already contains a percent sequence.
+ *
+ * Exported because section keys are derived from item ids and so carry the same restriction, and
+ * because the dashboard reads these maps through its own module. One codec for every key under a
+ * session node — a second, parallel implementation is how the two halves of a map end up disagreeing
+ * about what a key is called.
  */
+const KEY_ESCAPES: Array<[string, string]> = [
+  ['%', '%25'],
+  ['.', '%2E'],
+  ['$', '%24'],
+  ['#', '%23'],
+  ['[', '%5B'],
+  [']', '%5D'],
+  ['/', '%2F'],
+];
+
 export function encodeKey(key: string): string {
-  return key.replace(/\./g, '%2E');
+  return KEY_ESCAPES.reduce((acc, [ch, esc]) => acc.split(ch).join(esc), key);
 }
 
 export function decodeKey(key: string): string {
-  return key.replace(/%2E/g, '.');
+  return [...KEY_ESCAPES]
+    .reverse()
+    .reduce((acc, [ch, esc]) => acc.split(esc).join(ch), key);
 }
 
 function encodeKeys<T>(map: Record<string, T>): Record<string, T> {
@@ -27,6 +45,36 @@ function encodeKeys<T>(map: Record<string, T>): Record<string, T> {
 export function decodeKeys<T>(map: Record<string, T>): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [k, v] of Object.entries(map)) out[decodeKey(k)] = v;
+  return out;
+}
+
+/** Whether a snapshot node exists and holds at least one entry. RTDB drops empty nodes, but a node
+ * whose entries were all cleared can still arrive as an empty object from a local write. */
+function hasEntries(node: unknown): boolean {
+  return (
+    typeof node === 'object' && node !== null && Object.keys(node).length > 0
+  );
+}
+
+/**
+ * The legacy `approvals` node, read as `itemStatus`.
+ *
+ * Approval used to be stored as `approvals: { [itemId]: true }` and is now
+ * `itemStatus: { [itemId]: "approved" }`. The two record the same fact — `"approved"` is a
+ * generalization of that `true`, and `ItemStatus` has no other member — so the mapping is total and a
+ * room approved before the rename loses nothing by being read through it.
+ *
+ * Read-only, and deliberately not written back. A room is only rewritten under this key when someone
+ * actually approves or withdraws in it, so an untouched room keeps its old node and stays readable by
+ * any build still on the old name. Only truthy values map: `approvals` had no `false`, but a hand-edited
+ * node might, and that means not approved.
+ */
+function mapLegacyApprovals(node: unknown): Record<string, ItemStatus> {
+  if (typeof node !== 'object' || node === null) return {};
+  const out: Record<string, ItemStatus> = {};
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (value) out[key] = 'approved';
+  }
   return out;
 }
 
@@ -88,6 +136,10 @@ export async function ensureSession(sessionId: string, state: SessionState): Pro
       // Keyed by TeamMember.id, which is a sanitized email and already free of forbidden characters,
       // so this map is the one that is stored as-is.
       projectAssignees: state.projectAssignees,
+      // Stamped once, at seed. The room keeps the rules its section keys were minted under, so a
+      // later build resolving the same doc differently can notice rather than quietly show every
+      // section as unassigned.
+      sectionAlgoVersion: SECTION_ALGO_VERSION,
       createdAt,
     };
   });
@@ -111,12 +163,30 @@ export function subscribeToSession(
         ratings: decodeKeys(val.ratings ?? {}),
         contextUrls: decodeKeys(val.contextUrls ?? {}),
         // Every session node written before these fields existed lacks them, so each defaults to an
-        // empty map rather than being trusted to be present. Nodes written *before* per-item
-        // assignment was removed still carry `assignees`/`reviewers`; they are simply not read.
-        itemStatus: decodeKeys(val.itemStatus ?? {}),
+        // empty map rather than being trusted to be present.
+        //
+        // `itemStatus` falls back to the `approvals` node it replaced, so a room approved before the
+        // rename opens with those sign-offs intact instead of reading as though nobody had reviewed
+        // anything. A session written before approval existed has neither node and opens with
+        // everything ready and nothing approved — which is the right starting point.
+        itemStatus: decodeKeys(val.itemStatus ?? mapLegacyApprovals(val.approvals)),
+        // Only the section-keyed nodes are read. A session written before assignment moved from
+        // questions to sections still holds item-keyed assignees/reviewers; those are obsolete and
+        // left untouched rather than migrated, so such a session opens with every section
+        // unassigned.
         sectionAssignees: decodeKeys(val.sectionAssignees ?? {}),
         sectionReviewers: decodeKeys(val.sectionReviewers ?? {}),
         projectAssignees: val.projectAssignees ?? {},
+        // The obsolete nodes are still worth noticing. Their presence is the only evidence that a
+        // room's blank assignment is stale data rather than work nobody has started, and such a room
+        // carries no sectionAlgoVersion either (the stamp postdates the move), so the version check
+        // alone cannot see it.
+        hasLegacyItemAssignment:
+          hasEntries(val.assignees) || hasEntries(val.reviewers),
+        // Left undefined when the node predates the stamp, which is not the same as a known
+        // mismatch: an unstamped room may well have been seeded by these very rules.
+        sectionAlgoVersion:
+          typeof val.sectionAlgoVersion === 'number' ? val.sectionAlgoVersion : undefined,
       });
     }
   });
@@ -209,6 +279,8 @@ export async function revertAssignmentsForMember(memberId: string): Promise<void
   const sessions = snapshot.val();
   if (!sessions) return;
 
+  // Keys are already in their encoded form here, having come straight back from RTDB, so they are
+  // spliced into the paths as-is.
   const updates: Record<string, null> = {};
   for (const [sessionId, session] of Object.entries(sessions as Record<string, any>)) {
     for (const [sectionKey, assigneeId] of Object.entries(session.sectionAssignees ?? {})) {

@@ -2,14 +2,44 @@ export interface QAItem {
   id: string;
   question: string;
   answer: string;
+  /**
+   * Explicit section label, when the producer supplies one. Preferred over anything derived from
+   * `id`. rag-cli calls this `source`; parseQAFile normalises both into this field.
+   */
+  section?: string;
+}
+
+/** One resolved section, real or inferred. `key` is what filters and grouping match on. */
+export interface SectionInfo {
+  key: string;
+  label: string;
+  /** True when we segmented by topic because the file carried no section signal. */
+  inferred: boolean;
+  count: number;
+}
+
+/** Resolved sections for a file, plus the item -> section lookup callers group by. */
+export interface SectionMap {
+  byItemId: Record<string, string>;
+  sections: SectionInfo[];
+}
+
+/** An item as it appears on disk, before normalisation. */
+export interface RawQAItem {
+  id: string;
+  question: string;
+  answer: string;
+  section?: string;
+  /** rag-cli's name for the section label. */
+  source?: string;
 }
 
 export interface QAFile {
   generated_at: string;
   model: string;
   /** Some files use "results", spec says "result" — we handle both */
-  results?: QAItem[];
-  result?: QAItem[];
+  results?: RawQAItem[];
+  result?: RawQAItem[];
 }
 
 export interface ParsedQAFile {
@@ -18,13 +48,17 @@ export interface ParsedQAFile {
   items: QAItem[];
 }
 
-export type FilterStatus = "all" | "answered" | "unanswered";
+/**
+ * "answered" used to mean "the model produced an answer". Approval split that in two: an answer the
+ * model produced is `ready`, and only a human clicking Approve makes it `approved`.
+ */
+export type FilterStatus = "all" | "approved" | "unanswered";
 
 export interface Filters {
   status: FilterStatus;
-  // "" = all sections; a plain section number (e.g. "1") = that section;
-  // "assignee:<TeamMember.id>" / "reviewer:<TeamMember.id>" = sections containing
-  // at least one item where that member is the assignee/reviewer
+  // "" = all sections; otherwise a SectionInfo.key (e.g. "1", "CP", "3~2", "inferred:4");
+  // "assignee:<TeamMember.id>" / "reviewer:<TeamMember.id>" = the sections that member
+  // is the assignee/reviewer of
   section: string;
   search: string;
 }
@@ -55,7 +89,14 @@ export interface SessionState {
    * before the removal keep their badge and their CSV column instead of silently disappearing.
    */
   contextUrls: Record<string, string>;
-  /** item.id -> "approved". Absent means ready (if answered) or unanswered (if blank). */
+  /**
+   * item.id -> "approved". Absent means ready (if answered) or unanswered (if blank).
+   *
+   * Stored under the `itemStatus` RTDB node, which replaced the boolean `approvals` node. A room
+   * written before that rename still holds `approvals`, and `subscribeToSession` folds it in — the two
+   * record the same fact, `"approved"` being a generalization of `true`, so no sign-off is lost to the
+   * rename. See `mapLegacyApprovals` in `lib/session.ts`.
+   */
   itemStatus: Record<string, ItemStatus>;
   /** TeamMember.id -> true. Project-level owners, set by a lead. Does not cascade to items. */
   projectAssignees: Record<string, true>;
@@ -71,6 +112,19 @@ export interface SessionState {
    * every item in it.
    */
   sectionReviewers: Record<string, string>;
+  /**
+   * Which version of lib/sectioning.ts minted the keys the two maps above are stored against. Those
+   * keys are algorithm output, so a session seeded under different rules keys its assignment to
+   * sections this build does not produce. Undefined for a session written before the stamp existed.
+   */
+  sectionAlgoVersion?: number;
+  /**
+   * Whether the session still carries the obsolete item-keyed assignees/reviewers nodes. Set by
+   * subscribeToSession from the raw snapshot; never written back. Rooms from before assignment moved
+   * to sections predate sectionAlgoVersion too, so this is the only signal that their empty
+   * assignment is data this build declines to read rather than work nobody has done.
+   */
+  hasLegacyItemAssignment?: boolean;
 }
 
 export interface TeamMember {

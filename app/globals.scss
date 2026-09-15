@@ -268,6 +268,11 @@
     border-color: var(--vf-color-border-caution);
   }
 
+  &--information {
+    background-color: var(--vf-color-background-information-default);
+    border-color: var(--vf-color-border-information);
+  }
+
   &--gold {
     background-color: rgba(255, 215, 0, 0.18);
     border-color: #b8860b;
@@ -333,10 +338,45 @@
   color: #ffd700;
 }
 
+// Whole-section show/hide. Square and bordered like .section-header__block so it reads as one more
+// box in the header row, but it is the only one that is a control.
+.section-header__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  border-radius: 0;
+  background-color: transparent;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--vf-color-background-hover);
+  }
+
+  i {
+    // Vanilla's icons are sized by their background image, so both dimensions have to move together
+    // or the glyph draws at the smaller of the two.
+    width: 1rem;
+    height: 1rem;
+  }
+}
+
 .section-cards {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+
+  // Out of the flow entirely, not just hidden: a collapsed section should take no room. No height
+  // transition here — a section can be several thousand pixels tall, which no fixed max-height
+  // covers honestly.
+  &.is-collapsed {
+    display: none;
+  }
 }
 
 .answer-bullet {
@@ -348,6 +388,60 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+// Rating on the left, approval pinned to the right-hand corner of the same line.
+.question-card__footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: space-between;
+}
+
+// Shaped like .section-header__block so approval reads as one of the app's status boxes, but it is a
+// control: the whole box is the button, and it carries its own state rather than reporting a count.
+.question-card__approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  box-sizing: border-box;
+  height: 1.75rem;
+  // The parent row already does the pinning with justify-content: space-between.
+  margin: 0;
+  padding: 0 0.5rem;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  border-radius: 0;
+  background-color: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background-color: var(--vf-color-background-hover);
+  }
+
+  &--approved {
+    background-color: var(--vf-color-background-positive-default);
+    border-color: var(--vf-color-border-positive);
+  }
+
+  // Unanswered questions: nothing to sign off on. Shown, not hidden, so the corner does not change
+  // shape from one card to the next.
+  &:disabled {
+    color: var(--vf-color-text-muted);
+    border-color: var(--vf-color-border-low-contrast);
+    background-color: transparent;
+    cursor: not-allowed;
+  }
+
+  i {
+    // Both dimensions, or the glyph draws at the smaller of the two.
+    width: 1rem;
+    height: 1rem;
+  }
 }
 
 .star-rating__star {
@@ -372,46 +466,75 @@
   margin-left: 0.25rem;
 }
 
+// `.context-url-row` used to live here, styling the URL input and its link. The input is gone and the
+// read path is a `p-chip` badge on the card header now, so nothing carries these classes.
+
+// Assignee/reviewer pickers on the section header row.
+//
+// Sized and bordered to match .section-header__block so the header reads as one set of boxes, but
+// the whole box is the button — label included — rather than only the name being clickable.
 .team-member-select {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  display: inline-flex;
   min-width: 0;
-  flex: 1 1 12rem;
 }
 
 .team-member-select__trigger {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
+  gap: 0.375rem;
+  box-sizing: border-box;
+  height: 1.75rem;
+  margin: 0;
+  padding: 0 0.5rem;
+  background-color: transparent;
+  border: 1px solid var(--vf-color-border-high-contrast);
+  border-radius: 0;
+  color: inherit;
+  font-size: 0.875rem;
+  // Not line-height: 1. That makes the line box exactly as tall as the font size, so descenders
+  // (the tail of a "g" in "Assignee") fall outside it and are clipped by the overflow: hidden that
+  // gives the value its ellipsis. The button's height is fixed and its children are centred, so a
+  // taller line box costs no extra box height.
+  line-height: 1.4;
   text-align: left;
-  border-color: var(--vf-color-border-high-contrast);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.1s ease-in-out;
+
+  &:hover {
+    background-color: var(--vf-color-background-hover);
+  }
+
+  &[aria-expanded="true"] {
+    background-color: var(--vf-color-background-active);
+  }
 
   // One fixed size for the chevron in every state.
   //
   // Vanilla's icons hide their own text with `overflow: hidden`, which makes a flex item's automatic
   // minimum size 0 — so the arrow was free to shrink, and it did: with nobody assigned the trigger's
   // content fitted and the arrow drew at full size, while a long member's name overflowed and the
-  // flex algorithm took the shortfall out of the label *and* the arrow together. The size of the
-  // arrow therefore tracked the length of the name. `flex: 0 0 auto` takes it out of that
-  // negotiation, leaving the label — which has `min-width: 0` and its own `overflow: hidden` — to
-  // absorb every overflow by ellipsis, which is what it is for.
+  // flex algorithm took the shortfall out of the label *and* the arrow together. `flex: 0 0 auto`
+  // takes it out of that negotiation, leaving the label — which has `min-width: 0` and its own
+  // `overflow: hidden` — to absorb every overflow by ellipsis, which is what it is for.
   //
   // Both dimensions are set: Vanilla icons are background images sized `contain` on a square box, so
   // a height alone would leave the arrow drawn at its width.
   i {
     flex: 0 0 auto;
-    width: 0.875rem;
-    height: 0.875rem;
+    width: 1rem;
+    height: 1rem;
     margin-left: auto;
   }
 }
 
+.team-member-select__label {
+  color: var(--vf-color-text-muted);
+}
+
 .team-member-select__trigger-label {
-  flex: 1 1 auto;
   min-width: 0;
+  max-width: 12rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -467,12 +590,28 @@
   cursor: pointer;
 }
 
+// The box hue carries the question's state, since the cards have no state badge of their own:
+// red = unanswered, blue = has an answer awaiting approval, green = a human approved it.
+//
+// One modifier per state, all built the same way as the original --unanswered pair. --edited comes
+// last on purpose: it sets border-color only, so a ready question that has been edited keeps the blue
+// fill under an amber border. Approved cards are never given --edited, so green always stays green.
 .question-card {
   overflow-x: hidden;
 
   &--unanswered {
     border-color: var(--vf-color-border-negative);
     background-color: var(--vf-color-background-negative-default);
+  }
+
+  &--ready {
+    border-color: var(--vf-color-border-information);
+    background-color: var(--vf-color-background-information-default);
+  }
+
+  &--approved {
+    border-color: var(--vf-color-border-positive);
+    background-color: var(--vf-color-background-positive-default);
   }
 
   &--edited {
@@ -529,11 +668,18 @@
   overflow: hidden;
   max-height: 4000px;
   opacity: 1;
-  transition: max-height 0.2s ease, opacity 0.2s ease;
+  // `visibility` is transitioned with a zero duration so it can be *delayed* below. On the way open
+  // it flips at 0s and the height and fade do the work.
+  transition: max-height 0.2s ease, opacity 0.2s ease, visibility 0s linear 0s;
 
   &.is-collapsed {
     max-height: 0;
     opacity: 0;
+    // Not just clipped: a card collapsed to zero height still had its controls in the tab order and
+    // in the accessibility tree, so Approve could be reached — and pressed — on an answer nobody
+    // could see. Delayed by the length of the collapse so the animation still plays out.
+    visibility: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease, visibility 0s linear 0.2s;
   }
 }
 

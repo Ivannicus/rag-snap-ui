@@ -1,19 +1,21 @@
 "use client";
 
-import type { Filters, FilterStatus, PersonFilterOption } from "@/lib/types";
+import type { Filters, FilterStatus, PersonFilterOption, SectionInfo } from "@/lib/types";
 
 interface Props {
   filters: Filters;
-  sections: string[];
+  sections: SectionInfo[];
   personFilterOptions: PersonFilterOption[];
   onChange: (filters: Filters) => void;
   resultCount: number;
   totalCount: number;
 }
 
+// "Approved" means human-approved, not "the model produced an answer". Questions that have an answer
+// nobody has signed off on yet are only reachable through "All".
 const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "answered", label: "Answered" },
+  { value: "approved", label: "Approved" },
   { value: "unanswered", label: "Unanswered" },
 ];
 
@@ -67,7 +69,7 @@ export default function FilterBar({
                   filters.status === value
                     ? value === "unanswered"
                       ? "p-button--negative"
-                      : value === "answered"
+                      : value === "approved"
                       ? "p-button--positive"
                       : "p-button--brand"
                     : "p-button--base"
@@ -105,9 +107,11 @@ export default function FilterBar({
             </optgroup>
           )}
           <optgroup label="Filter by section">
+            {/* sec.label already reads as a heading ("Section 3.2", "Active Directory"), so it is
+                rendered verbatim rather than prefixed here. */}
             {sections.map((sec) => (
-              <option key={sec} value={sec}>
-                Section {sec}
+              <option key={sec.key} value={sec.key}>
+                {sec.label}
               </option>
             ))}
           </optgroup>

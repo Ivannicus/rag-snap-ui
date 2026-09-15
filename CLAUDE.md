@@ -8,11 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev      # Start dev server at http://localhost:3000
 npm run build    # Production build (also runs the TypeScript check)
 npx tsc --noEmit # Type check on its own
+npm run lint     # eslint . — flat config in eslint.config.mjs (`next lint` was removed in Next 16)
 ```
 
-`npm run lint` is currently broken and not worth chasing before you have a reason to: Next 16 removed
-`next lint`, and the repo still carries an `.eslintrc.json` that ESLint 9 will not read without a flat
-config. Use `npm run build` as the gate — it type checks and compiles the SCSS.
+All three are gates. `npm run lint` in particular: it enforces `react-hooks/set-state-in-effect`, which
+this codebase breaks easily — the dashboard and the question card both grew several violations while the
+lint script was broken and nobody could see them. Where an effect genuinely has to set state (a
+`localStorage` read that must not run during a prerender, say) the convention is an
+`// eslint-disable-next-line react-hooks/set-state-in-effect -- <reason>` rather than a silent exception.
 
 There are no tests in this project. Verify by hand with `npm run dev`.
 
@@ -60,13 +63,22 @@ library:
 - `projectAssignees: Record<string, true>` — the open project's owners; **read here, never written here**
   (the dashboard owns the writer). The inspector needs it because owners gate who a section may name
 - `teamMembers: TeamMember[]` — the global team bank (not part of `SessionState`)
-- `filters: Filters`, `darkMode: boolean` (persisted to `localStorage`)
+- `filters: Filters` — read through `effectiveFilters`, which drops a person filter whose option has
+  gone rather than showing an empty list. `OverviewView` does the same with `effectiveOwnerFilter`
+- `override` / `viewState` — which cards are expanded and which sections are collapsed, per doc
+- `darkMode: boolean` (persisted to `localStorage`)
 - `docId: string | null` — the open project; **also its session id** (see below)
 
 There is no echo suppression on remote snapshots. Every snapshot is applied, including the echo of the
 app's own write: RTDB reflects local writes locally before the server confirms them, so an echo can
 never carry a stale value, and writes are per field so an echo for one item cannot clobber another.
 `sameMap` keeps the no-op echoes from causing renders.
+
+Card expansion and section collapse live in `lib/expansion.ts`, persisted to `localStorage` per `docId`
+(most-recently-touched first, capped at 25 docs). Deliberately **not** synced to the session — it is one
+reader's view of the doc, and syncing it would let someone's collapse close a card another person was
+reading. `override` holds the doc it belongs to alongside its state, so a stale entry cannot be applied
+to the wrong doc across a switch.
 
 The dashboard holds its own state in `components/OverviewView.tsx` rather than in `AppShell`.
 
@@ -95,10 +107,13 @@ clicking it on the dashboard does) therefore used to blank owners, approvals and
 somebody else happened to write something. The overlays on screen already belong to that doc, so a
 re-open has nothing to clear.
 
-RTDB forbids `.` in keys, so item ids like `"1.1"` are stored encoded. **`encodeKey`/`decodeKey` are
-exported from `lib/session.ts` — use them. Do not hand-roll a second codec.** Section keys derive from
-item ids and carry the same restriction. `projectAssignees` is the exception: it is keyed by
-`TeamMember.id`, a sanitized email, which needs no encoding.
+RTDB forbids `.`, `$`, `#`, `[`, `]` and `/` in keys, so item ids like `"1.1"` are stored encoded.
+**`encodeKey`/`decodeKey` are exported from `lib/session.ts` — use them. Do not hand-roll a second
+codec.** `%` is escaped first and unescaped last, so the mapping stays reversible for a key that already
+contains a percent sequence. `/` is the one that matters most: RTDB reads it as a path separator and
+silently *nests* the value instead of rejecting it, and section keys can come from producer-supplied
+labels like `"Security/Compliance"`. `projectAssignees` is the exception: it is keyed by `TeamMember.id`,
+a sanitized email, which needs no encoding.
 
 ### Projects: `/savedFiles` + `/savedFileData`
 
@@ -214,9 +229,12 @@ turn; do not reintroduce it.
 
 ### Key data model: three item states
 
-Items have `id` strings in `"section.question"` format (`"1.2"`, `"3.10"`); the section is index 0 after
-splitting on `.`. `parseQAFile` accepts both `"results"` and `"result"`, and disambiguates duplicate
-ids by suffixing them.
+Item ids are producer-supplied strings and carry no guaranteed shape — **do not split one on `.` to
+find its section.** What a section is, and which section an item belongs to, is decided by
+`lib/sectioning.ts:resolveSections` (see Sectioning below) and looked up through `sectionKeyOf`.
+`parseQAFile` accepts both `"results"` and `"result"`, and de-duplicates repeated ids by appending
+`.1`, `.2`, … — which injects a `.` into those ids, and is why `chooseIdDelimiter` requires its
+delimiter to appear in *every* id rather than watching for a drop in bucket count.
 
 Every item is in exactly one of three states. **Only `approved` is stored** — the other two are
 derived, and approval wins over both:
@@ -226,6 +244,14 @@ derived, and approval wins over both:
 | `approved` | `itemStatus[id] === "approved"` |
 | `unanswered` | not approved, `isUnanswered(item.answer)`, and no `editedAnswers[id]` |
 | `ready` | everything else — answered, not signed off |
+
+**`itemStatus` replaced a boolean `approvals` node**, and rooms written before that rename still hold
+`approvals`. `subscribeToSession` folds it in through `mapLegacyApprovals` — `"approved"` is a
+generalization of that `true`, so the mapping is total and no sign-off is lost to the rename. It is
+read-only and never written back, so an untouched room keeps its old node and stays readable by any
+build still on the old name; a room is only rewritten under `itemStatus` once somebody actually approves
+or withdraws in it. **Do not drop that fallback** — it is the only thing standing between the rename and
+every approval recorded before it.
 
 `isUnanswered` (`lib/utils.ts`) is a prefix test on `"The provided context does not contain"`.
 
@@ -337,6 +363,8 @@ before the removal still hold those two maps; nothing reads them, `subscribeToSe
 them, and `revertAssignmentsForMember` does not clear them, so a departed member's id can linger there
 invisibly.
 
+The obsolete item-keyed nodes are left in place, neither read nor migrated, and **the path is deliberately not reused**: an item id and a section key can both be `"3"`, so writing section assignment there would resurrect a question-level assignment onto a section. A room still holding them is what `reportAlgoMismatch` reports on — they predate `sectionAlgoVersion`, so the version check alone cannot see them.
+
 `revertAssignmentsForMember` (`lib/session.ts`) clears all three when a member leaves the bank. It
 deliberately does **not** touch `itemStatus`, which holds only `"approved"` and no member id: clearing
 it would withdraw sign-offs across every project because one person left. Revoking a departed member's
@@ -364,6 +392,37 @@ authenticated `@canonical.com` user can add or remove. `ensureTeamMember` writes
 sign-in. `lib/teamBank.ts` also has `subscribeToTeamMembers` and `removeTeamMember`.
 
 Pass `teamMembers` down from `AppShell` rather than subscribing again in a new component.
+
+`lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans every room under
+`/sessions` and clears any `sectionAssignees`/`sectionReviewers` entry pointing at the removed member,
+reverting those sections to "Unassigned". Called whenever a member leaves the team bank, so a removed
+person's name cannot go on being the reviewer who has to approve a section.
+
+### Sectioning
+
+`lib/sectioning.ts:resolveSections` decides what a section is, in three tiers:
+
+1. an explicit per-item `section` label
+2. hierarchical ids — the delimiter is chosen from `. - _ : / space`, requiring the delimiter to appear
+   in **every** id and then preferring the fewest buckets
+3. TextTiling-style contiguous topic inference, for files with no section signal at all (flat ids like
+   `1..56`)
+
+Inference is sequential rather than clustered so it is deterministic: collaborators in one live session
+must derive byte-identical sections from the same file. Every section is capped at `SECTION_CAP` (10)
+questions, **softly** — a trailing part below 5 folds back into the one before it, so 34 becomes
+10/10/14.
+
+Resolve the map **once per file, memoised on `data`** — never over a filtered subset. Boundaries derived
+from a filtered list would move as the user types, visibly rearranging sections and appearing to move
+people's assignments. `groupBySection` and `sectionKeyOf` only ever look the map up.
+
+Section keys are the primary key for assignment, and for inferred sections and split parts
+(`inferred:2`, `3~2`) they are outputs of this file. **Bump `SECTION_ALGO_VERSION` whenever a change
+there can re-key a section**, including any change to `SECTION_CAP`. The stamp is written into the room
+at seed and compared on load; a mismatch cannot be repaired, but `reportAlgoMismatch` says so out loud
+rather than letting the file read as though nobody was ever assigned — and it also fires for a room
+still holding the obsolete item-keyed `assignees`/`reviewers`, which carries no stamp at all.
 
 ### Export and the archive
 
@@ -430,10 +489,12 @@ page.tsx
         ├── [live session banner]
         ├── FilterBar — status toggle, section/person dropdown, search
         ├── SectionGroup (per section)
-        │   ├── TeamMemberSelect ×2 — section assignee + reviewer
+        │   ├── TeamMemberSelect ×2 — section assignee + reviewer, offered from the project's owners
         │   │                          (sectionAssignees / sectionReviewers)
+        │   ├── [collapse toggle] — hides this section's cards; per doc, via lib/expansion.ts
         │   └── QuestionCard (per item) — no assignment controls; see Assignment
         │       ├── CopyButton, StarRating
+        │       ├── [expansion] — owned by AppShell (expandedIds), remembered per doc
         │       └── [Approve / Withdraw approval] — the only writer of itemStatus
         └── RfpDatabaseView — unrelated RFP search over /rfpDatabase
 ```
@@ -479,12 +540,15 @@ SVGs with a square `viewBox` use `preserveAspectRatio="xMidYMid meet"` by defaul
   border: 1px solid var(--vf-color-border-high-contrast);
   font-size: 0.875rem; white-space: nowrap;
 
-  &--positive { background: var(--vf-color-background-positive-default); border-color: var(--vf-color-border-positive); }
-  &--negative { background: var(--vf-color-background-negative-default); border-color: var(--vf-color-border-negative); }
-  &--caution  { background: var(--vf-color-background-caution-default);  border-color: var(--vf-color-border-caution); }
+  &--positive    { background: var(--vf-color-background-positive-default);    border-color: var(--vf-color-border-positive); }
+  &--negative    { background: var(--vf-color-background-negative-default);    border-color: var(--vf-color-border-negative); }
+  &--caution     { background: var(--vf-color-background-caution-default);     border-color: var(--vf-color-border-caution); }
+  &--information { background: var(--vf-color-background-information-default); border-color: var(--vf-color-border-information); }
 }
 ```
-Use `--positive` (green) for answered/success, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning.
+Use `--positive` (green) for approved/success, `--information` (blue) for ready/in-progress, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning. The same four tints carry the question-card hues (`.question-card--approved` / `--ready` / `--unanswered` / `--edited`), so a card and its section badges always read as the same colour.
+
+**Hiding a collapsed panel.** Use `display: none` (`.section-cards.is-collapsed`), or `visibility: hidden` where an animation has to play out first (`.question-card__body.is-collapsed`, which delays the `visibility` flip by the length of the collapse). Never `max-height: 0` alone — the contents stay in the tab order and the accessibility tree, which is how the Approve button became reachable on a card nobody could see.
 
 **Square buttons** — Vanilla buttons are rounded by default. To make them square like the "Load JSON file" button:
 ```scss

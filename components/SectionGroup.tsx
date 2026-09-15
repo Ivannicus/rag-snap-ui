@@ -2,11 +2,13 @@
 
 import QuestionCard from "./QuestionCard";
 import TeamMemberSelect from "./TeamMemberSelect";
-import { isUnanswered } from "@/lib/utils";
-import type { ItemStatus, QAItem, TeamMember } from "@/lib/types";
+import { questionState } from "@/lib/utils";
+import type { ItemStatus, QAItem, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
-  section: string;
+  section: SectionInfo;
+  /** Position in the rendered list. Only used to mint a unique DOM id for this section's panel. */
+  index: number;
   items: QAItem[];
   searchTerm?: string;
   editedAnswers: Record<string, string>;
@@ -17,9 +19,19 @@ interface Props {
   onClearRating: (id: string) => void;
   /** Read-only now: passed down for the badge on cards that already have a URL. */
   contextUrls: Record<string, string>;
+  /** item.id -> "approved". A missing id means ready (if answered) or unanswered (if blank). */
   itemStatus: Record<string, ItemStatus>;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
+  /** Ids of the cards that are expanded. Missing id means collapsed. */
+  expandedIds: Record<string, true>;
+  onSetExpanded: (id: string, open: boolean) => void;
+  /**
+   * Whether this section's questions are shown. Independent of `expandedIds`: hiding the list
+   * leaves each card's own expansion alone, so re-opening the section restores it as it was.
+   */
+  open: boolean;
+  onSetOpen: (sectionKey: string, open: boolean) => void;
   /** TeamMember.id owning this whole section, from `sectionAssignees`. */
   sectionAssignee?: string;
   onSaveSectionAssignee: (sectionKey: string, memberId: string) => void;
@@ -47,6 +59,7 @@ interface Props {
 
 export default function SectionGroup({
   section,
+  index,
   items,
   searchTerm = "",
   editedAnswers,
@@ -59,6 +72,10 @@ export default function SectionGroup({
   itemStatus,
   onApprove,
   onUnapprove,
+  expandedIds,
+  onSetExpanded,
+  open,
+  onSetOpen,
   sectionAssignee,
   onSaveSectionAssignee,
   onClearSectionAssignee,
@@ -69,14 +86,20 @@ export default function SectionGroup({
   teamMembers,
   assignableMembers,
 }: Props) {
-  // The same three disjoint buckets the dashboard counts, over this section's items. Approval wins
-  // over the original answer, so an approved item is never also counted as unanswered.
-  const approvedCount = items.filter((i) => itemStatus[i.id] === "approved").length;
-  const unansweredCount = items.filter(
-    (i) => itemStatus[i.id] !== "approved" && isUnanswered(i.answer) && !editedAnswers[i.id]
-  ).length;
-  const readyCount = items.length - approvedCount - unansweredCount;
+  // The section's own tallies, through `questionState` so they are the same three disjoint buckets the
+  // dashboard counts and the card hues use. Ready and Approved are counted separately: a section is
+  // only finished when its Ready count reaches zero, which a single "Answered" figure could not show.
+  const counts = { unanswered: 0, ready: 0, approved: 0 };
+  for (const item of items) {
+    counts[questionState(item.answer, editedAnswers[item.id], itemStatus[item.id] === "approved")]++;
+  }
   const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
+
+  // Keyed on list position, not on section.key. Keys are used verbatim from explicit labels, so they
+  // carry spaces and punctuation an id cannot; squeezing those out collides — "A/B" and "A B" both
+  // reduce to "A-B", as do the split part "3~2" and a hyphen-delimited section "3-2" — and a
+  // duplicate id points aria-controls at whichever panel the document happens to reach first.
+  const panelId = `section-cards-${index}`;
 
   /**
    * Why the signed-in user may not approve in this section, or undefined when they may.
@@ -93,9 +116,9 @@ export default function SectionGroup({
     ? teamMembers.find((m) => m.id === sectionReviewer)
     : undefined;
   const approveDisabledReason = !sectionReviewer
-    ? `Section ${section} has no reviewer yet. Approval is the reviewer's to give, so assign one above first.`
+    ? `${section.label} has no reviewer yet. Approval is the reviewer's to give, so assign one above first.`
     : sectionReviewer !== myMemberId
-    ? `Only ${reviewer?.name ?? "this section's reviewer"} can approve section ${section}.`
+    ? `Only ${reviewer?.name ?? "this section's reviewer"} can approve ${section.label}.`
     : undefined;
 
   /**
@@ -126,55 +149,46 @@ export default function SectionGroup({
     <div>
       {/* Section header */}
       <div className="section-header">
-        <span className="p-heading--5 u-no-margin--bottom">
-          Section {section}
-        </span>
-        {/* A real section-level owner, stored under `sectionAssignees`. This used to show the assignee
-            of the section's *first item*, which read as a section owner but was not one: assigning it
-            was impossible, and it changed whenever question one changed hands. */}
-        <span className="section-header__block section-header__block--select">
-          Assignee:
-          {/* The trigger shows the chosen member itself, so there is no second badge with the same
-              avatar and name beside it. */}
-          <TeamMemberSelect
-            label=""
-            value={sectionAssignee}
-            teamMembers={optionsFor(sectionAssignee)}
-            emptyHint={noOwnersHint}
-            onSelect={(memberId) => onSaveSectionAssignee(section, memberId)}
-            onClear={() => onClearSectionAssignee(section)}
-          />
-        </span>
-        {/* A real section-level reviewer, stored under `sectionReviewers`. Like the assignee beside it
-            this used to be read-only text taken from the section's *first item*, so the section could
-            not be given a reviewer at all and the one shown changed whenever question one did. */}
-        <span className="section-header__block section-header__block--select">
-          Reviewer:
-          <TeamMemberSelect
-            label=""
-            value={sectionReviewer}
-            teamMembers={optionsFor(sectionReviewer)}
-            emptyHint={noOwnersHint}
-            onSelect={(memberId) => onSaveSectionReviewer(section, memberId)}
-            onClear={() => onClearSectionReviewer(section)}
-          />
-        </span>
+        <span className="p-heading--5 u-no-margin--bottom">{section.label}</span>
+
+        {/* Assignee and reviewer, one clickable box each. Both read straight off the section's
+            identity, so every question in the section shows the same assignment however the list is
+            filtered. The offered list is the project's owners, not the whole bank — see `optionsFor`. */}
+        <TeamMemberSelect
+          label="Assignee:"
+          value={sectionAssignee}
+          teamMembers={optionsFor(sectionAssignee)}
+          emptyHint={noOwnersHint}
+          onSelect={(memberId) => onSaveSectionAssignee(section.key, memberId)}
+          onClear={() => onClearSectionAssignee(section.key)}
+        />
+        <TeamMemberSelect
+          label="Reviewer:"
+          value={sectionReviewer}
+          teamMembers={optionsFor(sectionReviewer)}
+          emptyHint={noOwnersHint}
+          onSelect={(memberId) => onSaveSectionReviewer(section.key, memberId)}
+          onClear={() => onClearSectionReviewer(section.key)}
+        />
+
         <span className="section-header__block">
           {items.length} {items.length === 1 ? "Question" : "Questions"}
         </span>
-        {approvedCount > 0 && (
+        {/* Band tints, the same three the dashboard sizes its ring with, so a section's badges and a
+            project's progress cannot read as different colours for the same state. */}
+        {counts.approved > 0 && (
           <span className="section-header__block section-header__block--band-approved">
-            {approvedCount} Approved
+            {counts.approved} Approved
           </span>
         )}
-        {readyCount > 0 && (
+        {counts.ready > 0 && (
           <span className="section-header__block section-header__block--band-ready">
-            {readyCount} Ready
+            {counts.ready} Ready
           </span>
         )}
-        {unansweredCount > 0 && (
+        {counts.unanswered > 0 && (
           <span className="section-header__block section-header__block--band-unanswered">
-            {unansweredCount} Unanswered
+            {counts.unanswered} Unanswered
           </span>
         )}
         {editedCount > 0 && (
@@ -183,10 +197,26 @@ export default function SectionGroup({
           </span>
         )}
         <div className="section-header__rule" />
+
+        {/* Whole-section toggle. Last in the row, past the rule, so it sits at the right edge. */}
+        <button
+          type="button"
+          onClick={() => onSetOpen(section.key, !open)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          title={open ? "Collapse section" : "Expand section"}
+          className="section-header__toggle"
+        >
+          <i className={open ? "p-icon--chevron-up" : "p-icon--chevron-down"}></i>
+          <span className="u-off-screen">
+            {open ? `Collapse ${section.label}` : `Expand ${section.label}`}
+          </span>
+        </button>
       </div>
 
-      {/* Question cards */}
-      <div className="section-cards">
+      {/* Question cards. Hidden rather than unmounted when the section is closed: a card mid-edit
+          would otherwise lose its unsaved draft to a stray click on the section toggle. */}
+      <div id={panelId} className={`section-cards ${open ? "" : "is-collapsed"}`}>
         {items.map((item) => (
           <QuestionCard
             key={item.id}
@@ -203,6 +233,8 @@ export default function SectionGroup({
             approveDisabledReason={approveDisabledReason}
             onApprove={onApprove}
             onUnapprove={onUnapprove}
+            open={expandedIds[item.id] === true}
+            onSetOpen={onSetExpanded}
           />
         ))}
       </div>

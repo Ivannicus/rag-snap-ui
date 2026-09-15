@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface Props {
   /** ISO date string, or null when unset. */
@@ -47,16 +47,20 @@ function formatDueDate(iso: string): string {
  * Committing writes an ISO string at UTC midnight of the chosen day, so a due date means the same
  * calendar day to everyone looking at the dashboard rather than shifting by the reader's offset.
  *
- * `draft` is seeded from the prop and re-seeded when it changes, so a due date another lead sets while
- * this card is on screen shows up here rather than being masked by stale local state.
+ * `draft` is seeded when the editor opens, not held in step with the prop. It is only ever read by the
+ * input below, and the resting state renders `value` directly — so a due date another lead sets while
+ * this card is on screen already shows up without the draft being involved. Re-seeding it on every
+ * change of `value` would additionally mean a remote edit landing mid-type replaced what was being
+ * typed.
  */
 export default function DueDateField({ value, overdue, onChange }: Props) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(() => toDateInputValue(value));
+  const [draft, setDraft] = useState("");
 
-  useEffect(() => {
+  function startEditing() {
     setDraft(toDateInputValue(value));
-  }, [value]);
+    setEditing(true);
+  }
 
   function commit(next: string) {
     setEditing(false);
@@ -94,7 +98,7 @@ export default function DueDateField({ value, overdue, onChange }: Props) {
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        setEditing(true);
+        startEditing();
       }}
       // `--empty` centres the placeholder, matching the Team control's empty state. A set date stays
       // left-aligned against its icon, so it does not appear to shift each time the date changes.

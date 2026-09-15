@@ -13,6 +13,10 @@ export type ActiveView = "overview" | "inspector" | "database";
 interface Props {
   data: ParsedQAFile | null;
   filename: string | null;
+  /** Has answer text, no human sign-off yet. */
+  readyCount: number;
+  /** Human-approved. Only rises when someone clicks Approve. */
+  approvedCount: number;
   unansweredCount: number;
   totalCount: number;
   onLoad: (data: ParsedQAFile, filename: string, docId: string) => void;
@@ -32,6 +36,8 @@ interface Props {
 export default function Header({
   data,
   filename,
+  readyCount,
+  approvedCount,
   unansweredCount,
   totalCount,
   onLoad,
@@ -44,7 +50,8 @@ export default function Header({
   onDocRemoved,
   onExported,
 }: Props) {
-  const answeredCount = totalCount - unansweredCount;
+  // Everything is approved only if there is something to approve — an empty file is not "done".
+  const allApproved = totalCount > 0 && approvedCount === totalCount;
   const [managingUsers, setManagingUsers] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
   const manageUsersRef = useRef<HTMLDivElement>(null);
@@ -91,6 +98,8 @@ export default function Header({
                       <li key={m.id} className="p-list__item filter-bar__member">
                         <span className="filter-bar__member-info">
                           {m.photoURL ? (
+                            // Remote avatar, static export — see TeamMemberAvatar.
+                            // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={m.photoURL}
                               alt=""
@@ -139,6 +148,8 @@ export default function Header({
                   editedAnswers={editedAnswers}
                   ratings={ratings}
                   contextUrls={contextUrls}
+                  readyCount={readyCount}
+                  unansweredCount={unansweredCount}
                   sourceFilename={filename}
                   docId={docId}
                   onError={onError}
@@ -150,17 +161,25 @@ export default function Header({
 
             {/* Stats */}
             <div className={`header-meta__right ${data ? "" : "header-meta__hidden"}`}>
+              {/* Ready and Approved are separate tallies: a freshly loaded file where the model
+                  answered everything reads "50 Ready, 0 Approved", and Approved only climbs as
+                  someone signs each answer off. */}
+              <span className="p-chip p-chip--information u-no-margin--bottom">
+                <span className="p-chip__value">{readyCount} Ready</span>
+              </span>
               <span className="p-chip p-chip--positive u-no-margin--bottom">
-                <span className="p-chip__value">{answeredCount} Answered</span>
+                <span className="p-chip__value">{approvedCount} Approved</span>
               </span>
               {unansweredCount > 0 ? (
                 <span className="p-chip p-chip--negative u-no-margin--bottom">
                   <span className="p-chip__value">{unansweredCount} Unanswered</span>
                 </span>
               ) : (
-                <span className="p-chip p-chip--information u-no-margin--bottom">
-                  <span className="p-chip__value">All Answered!</span>
-                </span>
+                allApproved && (
+                  <span className="p-chip p-chip--positive u-no-margin--bottom">
+                    <span className="p-chip__value">All Approved!</span>
+                  </span>
+                )
               )}
               <span className="u-text--muted p-text--small u-no-margin--bottom">
                 {totalCount} Total
@@ -178,6 +197,8 @@ export default function Header({
             </header>
             <div className="remove-member-modal__body">
               {memberToRemove.photoURL ? (
+                // Remote avatar, static export — see TeamMemberAvatar.
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={memberToRemove.photoURL}
                   alt=""
