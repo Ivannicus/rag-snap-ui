@@ -3,8 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { parseQAFile } from "@/lib/utils";
 import { auth } from "@/lib/firebase";
-import { subscribeToSavedFiles, saveFile, removeSavedFile } from "@/lib/savedFiles";
-import type { ParsedQAFile, SavedFile } from "@/lib/types";
+import { subscribeToSavedFiles, saveFile, removeSavedFile, getSavedFile } from "@/lib/savedFiles";
+import type { ParsedQAFile, SavedFileMeta } from "@/lib/types";
 
 interface Props {
   /** `docId` is the saved-file id, which is also the id of the doc's collaboration room. */
@@ -20,8 +20,10 @@ export default function FileLoader({ onLoad, onDocRemoved }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [panelPosition, setPanelPosition] = useState<{ top: number; left: number } | null>(null);
-  const [savedFiles, setSavedFiles] = useState<SavedFile[]>([]);
-  const [fileToRemove, setFileToRemove] = useState<SavedFile | null>(null);
+  const [savedFiles, setSavedFiles] = useState<SavedFileMeta[]>([]);
+  const [fileToRemove, setFileToRemove] = useState<SavedFileMeta | null>(null);
+  // The doc whose document is being fetched from a click on its row, so the row can say so.
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribeToSavedFiles(setSavedFiles);
@@ -110,9 +112,32 @@ export default function FileLoader({ onLoad, onDocRemoved }: Props) {
     e.target.value = "";
   }
 
-  function handleSelectSavedFile(file: SavedFile) {
-    onLoad(file.data, file.filename, file.id);
-    setOpen(false);
+  /**
+   * Open a doc from the shared list.
+   *
+   * The list carries metadata only, so the document is fetched here rather than read off the row — the
+   * same route `handleOpenProject` takes from the dashboard. That is the point of the split: listing
+   * the bank no longer transfers every document in it, and one is loaded when someone asks for one.
+   *
+   * The panel stays open until the fetch lands, so the row can say it is working and a failure is
+   * reported somewhere the reader is still looking.
+   */
+  async function handleSelectSavedFile(file: SavedFileMeta) {
+    setError(null);
+    setOpeningId(file.id);
+    try {
+      const saved = await getSavedFile(file.id);
+      if (!saved) {
+        setError(`"${file.filename}" could not be opened. It may have just been removed.`);
+        return;
+      }
+      onLoad(saved.data, saved.filename, saved.id);
+      setOpen(false);
+    } catch {
+      setError(`"${file.filename}" could not be loaded. Check your connection and try again.`);
+    } finally {
+      setOpeningId(null);
+    }
   }
 
   async function confirmRemoveFile() {
@@ -171,18 +196,26 @@ export default function FileLoader({ onLoad, onDocRemoved }: Props) {
                   <button
                     type="button"
                     onClick={() => handleSelectSavedFile(f)}
+                    disabled={openingId !== null}
                     className="file-loader__saved-file"
                   >
-                    <i className="p-icon--file"></i>
+                    <i
+                      className={
+                        openingId === f.id
+                          ? "p-icon--spinner u-animation--spin"
+                          : "p-icon--file"
+                      }
+                    ></i>
                     <span className="file-loader__saved-file-info">
                       <span className="file-loader__saved-file-name">{f.filename}</span>
                       <span className="u-text--muted p-text--small u-no-margin--bottom file-loader__saved-file-uploader">
-                        by {f.uploadedByName}
+                        {openingId === f.id ? "Opening…" : `by ${f.uploadedByName}`}
                       </span>
                     </span>
                   </button>
                   <button
                     onClick={() => setFileToRemove(f)}
+                    disabled={openingId !== null}
                     aria-label={`Remove ${f.filename}`}
                     className="p-button--negative u-no-margin--bottom is-dense file-loader__remove-button"
                   >

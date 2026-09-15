@@ -80,13 +80,23 @@ export interface TeamMember {
   photoURL?: string;
 }
 
-export interface SavedFile {
+/**
+ * A saved doc without its questions and answers.
+ *
+ * This is what listing and watching the bank returns. The document lives at a sibling path, so a list
+ * of fifty docs costs fifty short records rather than fifty full corpora — see `lib/savedFiles.ts`.
+ * Fetch the document itself with `getSavedFile`, at the point someone actually opens one.
+ */
+export interface SavedFileMeta {
   id: string;
   filename: string;
-  data: ParsedQAFile;
   uploadedByName: string;
   uploadedByEmail: string;
   uploadedAt: number;
+}
+
+export interface SavedFile extends SavedFileMeta {
+  data: ParsedQAFile;
 }
 
 /**

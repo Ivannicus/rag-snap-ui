@@ -74,8 +74,8 @@ The dashboard holds its own state in `components/OverviewView.tsx` rather than i
 
 - **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com`, enforced
   in `signInWithGoogle`.
-- **RTDB**: four top-level nodes — `/savedFiles`, `/sessions`, `/teamMembers`, `/archivedProjects`
-  (plus `/rfpDatabase` for the unrelated RFP search view).
+- **RTDB**: five top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
+  `/archivedProjects` (plus `/rfpDatabase` for the unrelated RFP search view).
 
 **A project's session id is its saved-file id.** `sessions/<id>` and `savedFiles/<id>` share a key, so
 opening the same project always joins the same room instead of minting a new one. `ensureSession` seeds
@@ -100,29 +100,44 @@ exported from `lib/session.ts` — use them. Do not hand-roll a second codec.** 
 item ids and carry the same restriction. `projectAssignees` is the exception: it is keyed by
 `TeamMember.id`, a sanitized email, which needs no encoding.
 
-### Projects: `/savedFiles`
+### Projects: `/savedFiles` + `/savedFileData`
 
-`savedFiles/<pushId>` holds `filename`, the full `data`, uploader details, `contentHash`, plus
-dashboard metadata: `itemCount`, `aiUnansweredIds`, `dueDate`, `exportedAt`/`exportedBy`/
-`exportedByEmail`.
+`savedFiles/<pushId>` holds `filename`, uploader details, `contentHash`, plus dashboard metadata:
+`itemCount`, `aiUnansweredIds`, `dueDate`, `exportedAt`/`exportedBy`/`exportedByEmail`.
+
+**The document itself lives at `savedFileData/<pushId>`, keyed the same.** RTDB returns the whole
+subtree under any path you read, so a document stored *on* the record made every list of the bank
+transfer every document in it — `subscribeToSavedFiles` did that live, again on each upload, removal,
+due-date edit and export stamp. Nesting it deeper would not have helped; only reading a different path
+does. Both are written and removed in single multi-path `update`s at the root, so a record cannot exist
+without its document or outlive it.
+
+Records written before the split still carry an inline `data` child. `getSavedFile` falls back to it,
+and `listProjectMetas` migrates each one as it meets it (`migrateInlineData`), so the expensive shape
+drains away rather than needing a script. **Read a document only through `getSavedFile`** — never
+`savedFiles/<id>/data` directly, or you will miss the migrated ones.
 
 `saveFile` refuses duplicates two ways, and the difference matters: a matching `contentHash` means the
 bank already holds this document (open `existingId`), whereas a matching *filename* with different
 content means a different document owns that name (nothing safe to open — surface the clash).
 
-`itemCount` and `aiUnansweredIds` are **denormalized from `data` on purpose**, so the dashboard can size
-its status bands without loading any document. Records predating them are backfilled once by
-`listProjectMetas`.
+`itemCount` and `aiUnansweredIds` are **denormalized on purpose**, so the dashboard can size its status
+bands without loading any document. Records predating them are backfilled once by `listProjectMetas`.
+
+**Never `update()` a `savedFiles/<id>` record to edit it.** RTDB creates the node when it is absent, so
+editing a project someone else removed writes a partial ghost with no `filename` and no `uploadedAt`.
+Go through `updateExistingDoc`, which aborts in a `runTransaction` when the record is gone; the read
+paths also skip records too partial to draw.
 
 ### The Overview dashboard and its bandwidth rule
 
 **Never read `data` to render the dashboard.** With thirty projects on screen that would transfer the
 whole corpus twice over. The split:
 
-- `listProjectMetas()` (`lib/savedFiles.ts`) — **one-shot** metadata read. One-shot because
-  `savedFiles` records carry their `data`, so a live listener re-transfers every document on every
-  upload, removal, due-date edit and export stamp. `AppShell` bumps `overviewRefreshKey` on each entry
-  to the tab (and after an export) to re-read it instead.
+- `listProjectMetas()` (`lib/savedFiles.ts`) — **one-shot** metadata read, cheap now that documents live
+  under `/savedFileData`. Still one-shot rather than watched: the project list changes only through
+  actions the app itself takes, so `AppShell` bumps `overviewRefreshKey` on each entry to the tab (and
+  after an export) to re-read it instead of holding a listener open.
 - `subscribeToProjectOverlays()` (`lib/projects.ts`) — **live**, five small child-path listeners per
   project: `itemStatus`, `editedAnswers`, `ratings`, `sectionAssignees`, `projectAssignees`. Never
   `data`. `editedAnswers` is the one heavy member and is needed anyway — see the status model below.
@@ -495,10 +510,16 @@ Required `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`):
 Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel project config (`.vercel/`).
 
 `database.rules.json` defines RTDB access rules for `/sessions`, `/teamMembers`, `/savedFiles`,
-`/rfpDatabase` and `/archivedProjects` — all restricted to authenticated `@canonical.com` users — and
-`firebase.json` points the `database` deploy target at it.
+`/savedFileData`, `/rfpDatabase` and `/archivedProjects` — all restricted to authenticated
+`@canonical.com` users — and `firebase.json` points the `database` deploy target at it.
 
 **Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
-access to the `canonical-req-8605` Firebase project. `/archivedProjects` is a new node: until that
-deploy lands, every archive write is rejected by the rules, so exports will download their CSV but the
-completed list will stay empty and report the failure.
+access to the `canonical-req-8605` Firebase project.
+
+Two nodes are new and both fail closed until that deploy lands:
+
+- `/savedFileData` — **deploy before shipping this build.** Documents live here, so without the rule
+  every upload is rejected outright (the multi-path write is atomic, so nothing is half-saved and the
+  loader reports it), and opening an already-migrated project finds no document.
+- `/archivedProjects` — archive writes are rejected, so exports download their CSV but the completed
+  list stays empty and says so.
