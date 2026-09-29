@@ -1,20 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { dateInputToIso, isoToDateInput } from "@/lib/dates";
 
 interface Props {
   /** ISO date string, or null when unset. */
   value: string | null;
   overdue: boolean;
   onChange: (isoDate: string | null) => void;
-}
-
-/** `2026-08-31` — what `<input type="date">` reads and writes. */
-function toDateInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
 }
 
 /**
@@ -27,7 +20,7 @@ function toDateInputValue(iso: string | null): string {
  * midnight of the chosen day. Letting `toLocaleDateString` convert into the reader's zone first
  * subtracted a day for everyone west of UTC: a date set as 30 Sep read back as "29 Sep" in New York,
  * while the `<input type="date">` behind the same control still showed the 30th, because
- * `toDateInputValue` takes the UTC date part directly. One field, two different days.
+ * `isoToDateInput` takes the UTC date part directly. One field, two different days.
  */
 function formatDueDate(iso: string): string {
   const parsed = new Date(iso);
@@ -58,17 +51,13 @@ export default function DueDateField({ value, overdue, onChange }: Props) {
   const [draft, setDraft] = useState("");
 
   function startEditing() {
-    setDraft(toDateInputValue(value));
+    setDraft(isoToDateInput(value));
     setEditing(true);
   }
 
   function commit(next: string) {
     setEditing(false);
-    if (!next) {
-      if (value !== null) onChange(null);
-      return;
-    }
-    const iso = new Date(`${next}T00:00:00.000Z`).toISOString();
+    const iso = dateInputToIso(next);
     if (iso !== value) onChange(iso);
   }
 
@@ -83,7 +72,7 @@ export default function DueDateField({ value, overdue, onChange }: Props) {
         onKeyDown={(e) => {
           if (e.key === "Enter") commit(draft);
           if (e.key === "Escape") {
-            setDraft(toDateInputValue(value));
+            setDraft(isoToDateInput(value));
             setEditing(false);
           }
         }}

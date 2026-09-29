@@ -34,7 +34,25 @@ All work syncs live between everyone with the project open.
 
 `app/page.tsx` renders `<AuthGate />`, which handles Firebase auth state and shows either
 `<LoginScreen />` or `<AppShell />`. `app/import/page.tsx` renders `<ImportHandoff />`, a postMessage
-receiver for batches handed off from a local tool.
+receiver for batches handed off from a local tool (the snap). It bypasses `AuthGate` and observes auth
+itself.
+
+**The handoff saves, ACKs, then configures, in that order, and the order is the contract.** The batch is
+written with `saveFile` on accept and `HANDOFF_ACK` goes back as soon as that write lands, so the sender
+is never left waiting on a human. Only then does the shell open the shared `NewProjectModal` over it —
+through `initialProjectSetup`, which stages a project whose record *already exists*, so submitting
+configures it (`setDueDate` + a seeded room) instead of creating it again. Backing out is a **discard**
+on this path: the record is already in the bank, so cancelling removes it.
+
+Two things in that seam are load-bearing:
+
+- **Read `saveFile`'s result.** It does not throw for the outcomes that write nothing — it *returns*
+  them. Discarding it is what let a `duplicate` or a `filenameConflict` be ACKed as a durable save.
+  `filenameConflict` now answers `HANDOFF_ERROR` and stores nothing; `duplicate` is ACKed (that content
+  *is* in the bank) and offers the project it turned out to be, via the app's own `?doc=` entry.
+- **The handoff tab gets a real `docId`**, from the submit that seeds its room. It did not before, so
+  `ensureSession` never ran and `writeToSession` short-circuited: every rating, edit and approval made in
+  a handed-off tab was dropped in silence and lost on reload.
 
 ### Views
 
@@ -60,8 +78,13 @@ library:
 - `contextUrls: Record<string, string>` — `item.id → URL`; **read-only, no writer** (see below)
 - `itemStatus: Record<string, ItemStatus>` — `item.id → "approved"`
 - `sectionAssignees` / `sectionReviewers: Record<string, string>` — section key → `TeamMember.id`
-- `projectAssignees: Record<string, true>` — the open project's owners; **read here, never written here**
-  (the dashboard owns the writer). The inspector needs it because owners gate who a section may name
+- `projectAssignees: Record<string, true>` — the open project's owners. Read **and written** here: the
+  inspector needs it because owners gate who a section may name, and the header's **Manage Team
+  Members** panel edits that roster (`handleChangeProjectOwners`, through `writeToSession`). The
+  dashboard's owner pickers write the same node. Two writers is safe because `setProjectAssignees` is a
+  per-key merge patch — each id written as `true` or an explicit `null` — so two views changing
+  different owners at once say nothing about each other's keys. **Do not patch local state on that
+  write**: owners are a subscribed map, so the echo updates the screen (see `writeToSession`)
 - `teamMembers: TeamMember[]` — the global team bank (not part of `SessionState`)
 - `filters: Filters` — read through `effectiveFilters`, which drops a person filter whose option has
   gone rather than showing an empty list. `OverviewView` does the same with `effectiveOwnerFilter`
@@ -136,6 +159,16 @@ drains away rather than needing a script. **Read a document only through `getSav
 bank already holds this document (open `existingId`), whereas a matching *filename* with different
 content means a different document owns that name (nothing safe to open — surface the clash).
 
+**A project's name is the record's `filename`, and it is editable.** `NewProjectModal` seeds a Project
+name field from the incoming file's name; the picked-file path simply mints the record with whatever
+came back, and the snap-handoff path — whose record already exists — goes through `renameSavedFile`.
+That function repeats `saveFile`'s filename-uniqueness check (excluding itself) before writing, because
+renaming is otherwise the way around it, and it writes through `updateExistingDoc` so a record someone
+removed meanwhile is not resurrected as a ghost holding nothing but a name. The rename is **awaited**
+before the project opens, unlike the due date beside it: it can be refused, and reporting a clash after
+the project is already on screen would leave it showing a name it was not saved under. There is no
+rename control anywhere else — the name is chosen once, at setup.
+
 `itemCount` and `aiUnansweredIds` are **denormalized on purpose**, so the dashboard can size its status
 bands without loading any document. Records predating them are backfilled once by `listProjectMetas`.
 
@@ -156,10 +189,27 @@ whole corpus twice over. The split:
 - `subscribeToProjectOverlays()` (`lib/projects.ts`) — **live**, five small child-path listeners per
   project: `itemStatus`, `editedAnswers`, `ratings`, `sectionAssignees`, `projectAssignees`. Never
   `data`. `editedAnswers` is the one heavy member and is needed anyway — see the status model below.
+  **It calls back once as soon as all five listeners have delivered a first snapshot, whether or not
+  anything differed from empty.** That single exception to the change filter is what lets a caller tell
+  "no assignments" from "not loaded yet": a room with no `sectionAssignees` and no `projectAssignees`
+  reports `{}` for every key, `sameMap` finds no change, and without it `onUpdate` would never fire at
+  all — so an id's presence in `overlaysById` is a meaningful "settled" test. The settle is reported
+  after the *last* key arrives, so it is one extra call per project on mount, not five. `settled` is a
+  Set of keys rather than a countdown, because a key firing twice before another fires once must not
+  count twice.
 - `sameOverlays` / `sameMap` guard re-renders. **Nothing in this tree is memoized**, so an unguarded
   snapshot re-renders the whole grid.
 
 ### Cards and list are two renderers over one pipeline
+
+**Both of the dashboard's switches are `ModeToggle`** — `tab: "projects" | "mine"` in the header and
+`viewMode: "cards" | "list"` in the controls row. The tab pair used to be filled
+`p-button--brand`/`--base` buttons, which put them in the same visual register as the two *actions*
+beside them (New project, Manage Users) and left the header reading as four buttons rather than one
+switch and two actions. One component means one `aria-pressed` pair and one bar treatment, so the two
+switches cannot drift. Both set `--underline-tabs-bar` to brand orange; the tab toggle skips
+`.overview__view-toggle`'s grid equalisation, because it sits in a free-flowing header row rather than in
+a control column whose width its halves have to share.
 
 `viewMode: "cards" | "list"` in `OverviewView` picks between `ProjectCard` in a grid and
 `ProjectListRow` in a list. Everything upstream is shared — the same `visibleProjects`, the same
@@ -326,9 +376,18 @@ consuming it. Do not add a new writer without being asked — removing the input
 
 The section pair are single values, **not** fan-out writes to every item in the section.
 
+**Owners are edited from two places, one node.** The dashboard's `TeamMemberMultiSelect` on each card
+or row, and the Collab UI header's **Manage Team Members** panel (`ProjectTeamPanel`) for the open
+project. Both write `sessions/<id>/projectAssignees` through `setProjectAssignees`, so the two stay in
+step live and neither is a cache of the other. **Do not add a third store for this.** Note what the two
+Removes mean: unassigning in `ProjectTeamPanel` touches only that project, whereas Remove in the
+dashboard's `ManageUsersPanel` deletes the person from the bank and reverts their assignments
+everywhere (`revertAssignmentsForMember`).
+
 **A project's owners are the only people its sections may be handed to.** `AppShell`'s
 `assignableMembers` memo filters the team bank down to `projectAssignees`, and that — not the bank — is
-what the two `TeamMemberSelect`s in `SectionGroup` offer. Work flows through the project, not around it:
+what the two `TeamMemberSelect`s in `SectionGroup` offer. It is also what `ProjectTeamPanel` lists, so
+the header's roster and the pickers it gates cannot disagree. Work flows through the project, not around it:
 a section naming somebody who is not on the project at all used to be possible and said nothing about
 which of the two was wrong.
 
@@ -393,6 +452,29 @@ sign-in. `lib/teamBank.ts` also has `subscribeToTeamMembers` and `removeTeamMemb
 
 Pass `teamMembers` down from `AppShell` rather than subscribing again in a new component.
 
+**`findMemberByEmail(teamMembers, email)` is the one answer to "which member am I".** `AppShell`'s `me`
+memo and `OverviewView`'s both call it; they used to carry a copy of the same `find` each. It matches on
+email rather than sanitizing the address into a key locally — `sanitizeEmailKey` is private on purpose,
+and a second caller would not only duplicate the codec but mint an id for somebody the bank has no
+record of. Three things it is careful about, each with a plausible-looking wrong answer:
+
+- **An empty address matches nobody.** `subscribeToTeamMembers` normalizes a missing `email` child to
+  `''` and `AuthGate` passes `user.email ?? ""`, so a bare `===` pairs a user with no address to
+  whichever record is missing one — and shows them a stranger's assignments.
+- **Exact case beats a case-insensitive match.** The bank is keyed by the sanitized address, so
+  `Alice@…` and `alice@…` are two keys and two ids, and `ensureTeamMember` writes whatever the provider
+  returned. Where both exist, a plain case-insensitive `find` returns whichever RTDB enumerated first
+  and assignments against the other id silently vanish.
+- Whitespace is trimmed on both sides.
+
+**`MyAssignments` distinguishes three states, not two.** A null `me` means either "the bank has not
+arrived" or "you are genuinely not in it", and they need different words — `identityPending` (`!me &&
+userEmail && teamMembers.length === 0`) separates them, and an empty bank is the former because
+`ensureTeamMember` writes an entry on first sign-in. Likewise `overlaysPending` gates the "nothing is
+assigned to you" line, because a project waiting on its overlays is indistinguishable from one nobody
+is assigned to: saying "nothing" early is not a slower right answer, it is the wrong one. The list also
+names the person it belongs to, so a wrong identity is visible rather than plausible.
+
 `lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans every room under
 `/sessions` and clears any `sectionAssignees`/`sectionReviewers` entry pointing at the removed member,
 reverting those sections to "Unassigned". Called whenever a member leaves the team bank, so a removed
@@ -455,6 +537,54 @@ halves are written in one multi-path `update`, so an entry cannot be listed with
 The completed list enumerates the archive, **not `/sessions`** — `/sessions` keeps a node per document
 ever opened and never sheds one, so listing it would show every abandoned project as finished.
 
+**Each entry carries a reported deal outcome: `dealStatus: "won" | "lost" | "pending"`**, written by the
+`<select>` on its row through `setDealStatus`. A missing child reads as `"pending"` — "nobody has said
+yet" is exactly what pending means — so there is nothing to migrate and no entry without a status.
+`toDealStatus` also folds an *unrecognised* value to pending rather than trusting it into the type.
+
+**`archiveProject` writes the index entry one field per path, and that is load-bearing.** An `update`
+whose value is a whole object replaces that child, and because an entry is keyed by project, a
+re-export overwrites the entry already there — which would silently discard `dealStatus`, a field that
+function knows nothing about. Per-field paths merge, so a reported outcome survives a re-export.
+`payloads/<id>` stays a whole-object write (it *is* the document, and a fresh export replaces it by
+design), and both halves are still one atomic `update`.
+
+`setDealStatus` uses a plain `update`, which creates the node when absent, so `listArchivedProjects`
+filters entries with no `filename` or no `exportedAt` — the same guard `listProjectMetas` has, against
+the same ghost. The archive is never pruned by the app, so this can only bite if an entry is deleted in
+the console mid-click.
+
+The dashboard patches `archived` locally and **reverts on failure**, unlike the session writes in
+`AppShell` which leave the change on screen behind a toast. Those are edits a reader can see for
+themselves in the document; a deal status is a single word whose only evidence is the control, and left
+showing "Won" after a failed write it would be indistinguishable from a saved "Won".
+
+The section's **one filter spans two axes** — Record status (Open for revision / Archived — export only)
+and Deal outcome — separated by `<optgroup>`s. It is "Record status" rather than "Status" because the
+dashboard above already has a Status filter over *active* projects, and two controls on one screen
+labelled the same thing filtering different populations is worse than a longer word. Record status reads
+`liveProjectIds`, never the entry: whether
+a finished project can be reopened depends on whether its `savedFiles` record still exists, which
+export-and-remove decides *after* the entry is written, so nothing on the entry could know.
+
+`.completed-row` is a **grid with fixed tracks**, not a flex row, for the same reason and by the same
+rule as `.project-list__row`: flex sized every cell from its own content, so the columns started at a
+different x on each line and long dates and names sat clipped inside an 8rem box. Widths are
+`--completed-col-*` custom properties on `.completed-list`, each sized to hold its widest realistic
+content whole — so a value that does not fit means a track to widen, not something to ellipsize.
+**`--completed-col-name` is the only elastic track**; a second `1fr` would split the slack and take the
+alignment with it. The exporter column appears only above `85rem`, and the template gains its track in
+the same media query that stops hiding the cell — doing one without the other leaves an empty column or
+overflows the row. Below `60rem` the row wraps, as the project list's does.
+
+The status `<select>` is typed `select.completed-row__status` (0,1,1), not on the class alone: every
+metric it sets is one Vanilla already sets on a bare `select` (0,1,0), and the background is restated at
+`select:hover` (0,1,1), which a single class would lose to on hover. Only `background-color` is
+touched, never `background` — the chevron is a `background-image` on the same element and the shorthand
+would take it with it. The three tints are the app's own `positive` / `negative` / `caution`, so a
+colour means the same thing here as on a question card; `information` (blue) is deliberately unused, as
+it reads "in progress" and a finished project's deal is not.
+
 ### Static export constraint
 
 `next.config.js` sets `output: 'export'`. No API routes, no server components, no server actions, no
@@ -470,13 +600,18 @@ page.tsx
     └── AppShell (document state, view switching)
         ├── Sidebar — Overview / Collaborative UI / RFP Database, dark mode, user, sign out
         ├── Header — hidden on Overview
+        │   ├── ProjectTeamPanel — "Manage Team Members": the open project's roster, add/remove,
+        │   │                      writes sessions/<id>/projectAssignees (NOT the global bank)
         │   ├── FileLoader — upload or pick a saved project; remove
         │   ├── ShareButton — copies the ?doc= link
         │   ├── ExportButton — CSV, archive, optional export-and-remove
-        │   └── [Manage Users panel]
         ├── OverviewView — the dashboard (own state; metadata + overlay subscriptions)
+        │   ├── ManageUsersPanel — "Manage Users": the global team bank, add/remove people from the
+        │   │                       tool itself. Moved here from the header; removing runs
+        │   │                       removeTeamMember + revertAssignmentsForMember
+        │   ├── ModeToggle ×1 — All projects / My assignments (underline tabs, brand bar)
         │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, archived
-        │   ├── [sort / owner / status controls, Cards/List toggle, bulk-assign bar]
+        │   ├── [sort / owner / status controls, Cards/List ModeToggle, bulk-assign bar]
         │   ├── ProjectCard (per active project, in a responsive grid — "cards" view)
         │   │   ├── ProgressWheel — three hoverable bands, custom SVG
         │   │   ├── DueDateField — inline date editing

@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import ModeToggle from "./ModeToggle";
 import { isUnanswered, questionState } from "@/lib/utils";
 import type { QAItem } from "@/lib/types";
+
+/** Which of the two answers the card's single box is showing. */
+type AnswerMode = "ai" | "edited";
 
 interface Props {
   item: QAItem;
@@ -151,12 +155,26 @@ export default function QuestionCard({
 }: Props) {
   const [editingRequested, setEditingRequested] = useState(false);
   const [draft, setDraft] = useState("");
+  /**
+   * Which answer the box shows once there are two. Starts on the edited one, so a card with an edit
+   * opens on the answer that counts; only meaningful while `hasEdit`, hence `viewingOriginal` below
+   * rather than reading this directly.
+   */
+  const [answerMode, setAnswerMode] = useState<AnswerMode>("edited");
   const [revertRequested, setRevertRequested] = useState(false);
   const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
 
   const unanswered = isUnanswered(item.answer);
   const hasEdit = editedAnswer !== undefined;
   const state = questionState(item.answer, editedAnswer, approved);
+
+  /**
+   * True when the toggle exists and is showing the AI's answer — the one state in which the box holds
+   * text that must not be edited. Guarded on `hasEdit` rather than on `answerMode` alone, because
+   * before the first edit there is no toggle, and the original is exactly what a first edit starts
+   * from.
+   */
+  const viewingOriginal = hasEdit && answerMode === "ai";
 
   /**
    * An approved answer is frozen: sign-off is on the exact text that was signed off on, so editing it
@@ -166,8 +184,13 @@ export default function QuestionCard({
    * someone else can approve while this card is mid-edit. Derived rather than closed in an effect on
    * `approved`: an effect would take a second render to put the editor away, and for that render an
    * approved answer would still be sitting in an open textarea. `approved` simply wins here.
+   *
+   * `viewingOriginal` wins the same way and for the same reason: the AI answer is read-only, so the
+   * editor cannot be left open over it either. The toggle disables that half while a draft is
+   * unsaved, so nothing reaches this — but neither did anything reach the `approved` term until a
+   * collaborator's approval did.
    */
-  const editing = editingRequested && !approved;
+  const editing = editingRequested && !approved && !viewingOriginal;
   const confirmingRevert = revertRequested && !approved;
 
   function setEditing(next: boolean) {
@@ -179,7 +202,7 @@ export default function QuestionCard({
   }
 
   function startEdit() {
-    if (approved) return;
+    if (approved || viewingOriginal) return;
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
     onSetOpen(item.id, true);
@@ -188,6 +211,9 @@ export default function QuestionCard({
   function saveEdit() {
     if (draft.trim()) {
       onSaveEdit(item.id, draft.trim());
+      // The toggle appears on this save, so put it on the side that was just written rather than
+      // wherever it was left last time.
+      setAnswerMode("edited");
     }
     setEditing(false);
   }
@@ -217,99 +243,169 @@ export default function QuestionCard({
         state === "ready" && hasEdit ? " question-card--edited" : ""
       }`}
     >
-      {/* Question row — clickable to expand */}
+      {/* Question row — clickable to expand. Two rows inside, not one: the meta row holds the id, the
+          status badges and the chevron, and the question text has the full width of the card beneath
+          them. Side by side, the text was a flex item competing with the badges for room, so the same
+          question wrapped differently depending on how many badges its card happened to carry. */}
       <button
         onClick={() => onSetOpen(item.id, !open)}
         className="question-card__header"
       >
-        {/* ID badge */}
-        <span
-          className={`question-card__id-badge ${
-            unanswered && !hasEdit ? "question-card__id-badge--negative" : ""
-          }`}
-        >
-          {item.id}
+        <span className="question-card__meta">
+          {/* ID badge */}
+          <span
+            className={`question-card__id-badge ${
+              unanswered && !hasEdit ? "question-card__id-badge--negative" : ""
+            }`}
+          >
+            {item.id}
+          </span>
+
+          {/* Status badges, as one group so they stay together against the right edge. */}
+          <span className="question-card__badges">
+            {/* Approved badge. First of the status badges, since sign-off is the state that overrides the
+                others: an approved question is done regardless of whether it was edited on the way. */}
+            {approved && (
+              <span className="section-header__block section-header__block--band-approved">
+                <i className="p-icon--success" aria-hidden></i> Approved
+              </span>
+            )}
+
+            {/* Edited badge */}
+            {hasEdit && (
+              <span className="section-header__block section-header__block--caution">
+                Edited
+              </span>
+            )}
+
+            {/* Rating badge */}
+            {rating !== undefined && (
+              <span className="section-header__block section-header__block--gold">
+                {rating}/5
+                <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" className="rating-badge-star">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+              </span>
+            )}
+
+            {/* Context URL badge */}
+            {unanswered && contextUrl && (
+              <span className="p-chip p-chip--information">
+                <span className="p-chip__value">URL</span>
+              </span>
+            )}
+
+            {/* Unanswered badge — only if no edit has been applied, and never once approved */}
+            {!approved && unanswered && !hasEdit && (
+              <span className="section-header__block section-header__block--negative">
+                Unanswered
+              </span>
+            )}
+          </span>
+
+          {/* Chevron. The custom class is what keeps it one size: see `.question-card__chevron`. */}
+          <i
+            className={`question-card__chevron ${
+              open ? "p-icon--chevron-up" : "p-icon--chevron-down"
+            }`}
+          ></i>
         </span>
 
-        {/* Question text */}
+        {/* Question text — its own row, so nothing above can squeeze it. */}
         <span className="question-card__question">
           {highlight(item.question, searchTerm)}
         </span>
-
-        {/* Approved badge. First of the status badges, since sign-off is the state that overrides the
-            others: an approved question is done regardless of whether it was edited on the way. */}
-        {approved && (
-          <span className="section-header__block section-header__block--band-approved">
-            <i className="p-icon--success" aria-hidden></i> Approved
-          </span>
-        )}
-
-        {/* Edited badge */}
-        {hasEdit && (
-          <span className="section-header__block section-header__block--caution">
-            Edited
-          </span>
-        )}
-
-        {/* Rating badge */}
-        {rating !== undefined && (
-          <span className="section-header__block section-header__block--gold">
-            {rating}/5
-            <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" className="rating-badge-star">
-              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-            </svg>
-          </span>
-        )}
-
-        {/* Context URL badge */}
-        {unanswered && contextUrl && (
-          <span className="p-chip p-chip--information">
-            <span className="p-chip__value">URL</span>
-          </span>
-        )}
-
-        {/* Unanswered badge — only if no edit has been applied, and never once approved */}
-        {!approved && unanswered && !hasEdit && (
-          <span className="section-header__block section-header__block--negative">
-            Unanswered
-          </span>
-        )}
-
-        {/* Chevron */}
-        <i className={open ? "p-icon--chevron-up" : "p-icon--chevron-down"}></i>
       </button>
 
       {/* Collapsible answer area */}
       <div className={`question-card__body ${open ? "" : "is-collapsed"}`}>
         <div className="question-card__body-inner">
 
-          {/* ── Original answer ── */}
+          {/* ── The answer ──
+              One box, never two. Which of the two answers it holds is the toggle's business, and the
+              toggle only exists once there is a second answer to choose between: before the first edit
+              there is nothing to switch to, and during an edit the box *is* the editor.
+
+              The AI answer is read-only in every state. It is `item.answer` straight from the parsed
+              file and is never written to — an edit goes to `editedAnswers` under the item's id — so
+              the toggle keeps it viewable for as long as the document exists, however many times it is
+              re-edited. */}
           <div>
             {hasEdit && (
-              <p className="p-text--small-caps">Original</p>
+              <ModeToggle
+                className="question-card__answer-toggle"
+                ariaLabel={`Answer shown for question ${item.id}`}
+                value={answerMode}
+                onChange={setAnswerMode}
+                options={[
+                  {
+                    value: "ai",
+                    label: "AI Answer",
+                    // Switching away mid-edit would throw a draft away with nothing asked. The
+                    // approved-mid-edit path below has to discard one, because approval can arrive
+                    // from anyone at any moment and an approved answer cannot sit in an open textarea;
+                    // a click on this half has no such excuse, so it waits for Save or Cancel.
+                    disabledReason: editing ? "Save or cancel your edit first." : undefined,
+                  },
+                  { value: "edited", label: "Edited Answer" },
+                ]}
+              />
             )}
-            <div
-              className={`question-card__answer ${
-                unanswered
-                  ? hasEdit
-                    ? "question-card__answer--muted question-card__answer--struck"
-                    : "question-card__answer--unanswered"
-                  : hasEdit
-                  ? "question-card__answer--muted"
-                  : ""
-              }`}
-            >
-              {renderAnswer(item.answer, searchTerm)}
-              <div className="question-card__answer-actions">
-                <CopyButton text={item.answer} />
-              </div>
-            </div>
-          </div>
 
-          {/* ── Edited answer (shown when a saved edit exists) ── */}
-          {hasEdit && !editing && (
-            <div>
-              <p className="p-text--small-caps">Edited</p>
+            {editing ? (
+              <>
+                <textarea
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  rows={Math.max(4, draft.split("\n").length + 1)}
+                  className="u-no-margin--bottom"
+                />
+                <div className="question-card__edit-actions">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); saveEdit(); }}
+                    className="p-button--positive u-no-margin--bottom"
+                  >
+                    Save edit
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
+                    className="p-button--base u-no-margin--bottom"
+                  >
+                    Cancel
+                  </button>
+                  {hasEdit && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); requestRevert(); }}
+                      className="p-button--negative u-no-margin--bottom u-push-right"
+                    >
+                      Revert to original
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : viewingOriginal || !hasEdit ? (
+              /* The AI answer. Muted once an edit exists — and struck through as well when it was a
+                 non-answer — since it is then the superseded one of the two, and styled as the plain
+                 answer it is before that. Copy is its only control in either case: every writer of
+                 `editedAnswers` lives on the Edited Answer side. */
+              <div
+                className={`question-card__answer ${
+                  unanswered
+                    ? hasEdit
+                      ? "question-card__answer--muted question-card__answer--struck"
+                      : "question-card__answer--unanswered"
+                    : hasEdit
+                    ? "question-card__answer--muted"
+                    : ""
+                }`}
+              >
+                {renderAnswer(item.answer, searchTerm)}
+                <div className="question-card__answer-actions">
+                  <CopyButton text={item.answer} />
+                </div>
+              </div>
+            ) : (
               <div className="question-card__answer question-card__answer--edited">
                 {renderAnswer(editedAnswer!, searchTerm)}
                 {/* Copy survives approval; the two writers do not — an approved answer is frozen
@@ -337,62 +433,32 @@ export default function QuestionCard({
                   )}
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* ── Edit textarea (open when editing) ── */}
-          {editing ? (
-            <div>
-              <p className="p-text--small-caps">
-                {hasEdit ? "Re-editing" : "New edit"}
-              </p>
-              <textarea
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                rows={Math.max(4, draft.split("\n").length + 1)}
-                className="u-no-margin--bottom"
-              />
-              <div className="question-card__edit-actions">
-                <button
-                  onClick={(e) => { e.stopPropagation(); saveEdit(); }}
-                  className="p-button--positive u-no-margin--bottom"
-                >
-                  Save edit
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); cancelEdit(); }}
-                  className="p-button--base u-no-margin--bottom"
-                >
-                  Cancel
-                </button>
-                {hasEdit && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); requestRevert(); }}
-                    className="p-button--negative u-no-margin--bottom u-push-right"
-                  >
-                    Revert to original
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : approved ? (
-            /* Frozen, and said so in place of the Edit control rather than left as a gap — a missing
-               button reads as a bug, and the way back is the Withdraw approval button just below. */
+          {/* The state of the Edit control, for the states that have no control of their own. Each of
+              these says why there is nothing to click rather than leaving a gap where a button was, a
+              gap reading as a bug. Editing has its own buttons, and the Edited Answer side carries
+              Edit again inside the box. */}
+          {editing ? null : approved ? (
+            /* Frozen. The way back is the Withdraw approval button just below. */
             <p className="u-text--muted p-text--small u-no-margin--bottom">
               <i className="p-icon--lock-locked" aria-hidden></i> Approved answers can&rsquo;t be
               edited. Withdraw the approval below to change this one.
             </p>
-          ) : (
-            !hasEdit && (
-              <button
-                onClick={(e) => { e.stopPropagation(); startEdit(); }}
-                className="p-button--link u-no-margin--bottom u-align--left"
-              >
-                <i className="p-icon--edit"></i> Edit response
-              </button>
-            )
-          )}
+          ) : viewingOriginal ? (
+            <p className="u-text--muted p-text--small u-no-margin--bottom">
+              <i className="p-icon--lock-locked" aria-hidden></i> The AI&rsquo;s answer is read-only.
+              Switch to Edited Answer to make changes.
+            </p>
+          ) : !hasEdit ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); startEdit(); }}
+              className="p-button--link u-no-margin--bottom u-align--left"
+            >
+              <i className="p-icon--edit"></i> Edit response
+            </button>
+          ) : null}
 
           {/* ── Approval ──
               The only writer of `itemStatus`, and so the only way a question reaches the approved band

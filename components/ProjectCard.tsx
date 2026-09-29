@@ -153,7 +153,10 @@ export default function ProjectCard({
           type="button"
           onClick={() => onOpen(meta.id)}
           disabled={opening}
-          className="p-button--brand is-dense u-no-margin--bottom"
+          // `--positive`, Vanilla's green, rather than the brand orange: opening a project is the
+          // card's one affirmative action. The spinner keeps `is-light` either way — both fills are
+          // dark enough to need the white icon.
+          className="p-button--positive is-dense u-no-margin--bottom"
         >
           {opening ? (
             <>

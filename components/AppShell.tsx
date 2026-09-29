@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import type { ChangeEvent } from "react";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
 import OverviewView from "@/components/OverviewView";
+import NewProjectModal, { type NewProjectValues } from "@/components/NewProjectModal";
 import FilterBar from "@/components/FilterBar";
 import SectionGroup from "@/components/SectionGroup";
 import { groupBySection, questionState, sectionKeyOf } from "@/lib/utils";
@@ -24,9 +26,14 @@ import {
   clearSectionAssignee,
   updateSectionReviewer,
   clearSectionReviewer,
+  // Aliased past the React setter of the same name below. The state setter and the RTDB writer are
+  // both called `setProjectAssignees`, and the collision is exactly where a wrong one would be silent.
+  setProjectAssignees as writeProjectAssignees,
 } from "@/lib/session";
-import { getSavedFile } from "@/lib/savedFiles";
-import { subscribeToTeamMembers } from "@/lib/teamBank";
+import { ownerIdsFrom } from "@/lib/projects";
+import { getSavedFile, removeSavedFile, renameSavedFile, setDueDate } from "@/lib/savedFiles";
+import { createProject, readJsonFile } from "@/lib/newProject";
+import { findMemberByEmail, subscribeToTeamMembers } from "@/lib/teamBank";
 import {
   loadViewState,
   saveViewState,
@@ -98,13 +105,46 @@ function clearDocParam() {
   window.history.replaceState(null, "", url.toString());
 }
 
+/**
+ * A project waiting to be given a due date and a team.
+ *
+ * Carries a filename rather than a `File`, because the only thing the flow ever needed from the picked
+ * file was its name, and the snap handoff has no `File` at all — its batch arrives over postMessage.
+ */
+interface PendingProject {
+  filename: string;
+  data: ParsedQAFile;
+  /**
+   * Set when the record is already in the bank and this is configuration rather than creation.
+   *
+   * That is the handoff: it saves on accept so it can ACK the snap straight away, and only then asks
+   * for a due date and a team. Absent for the file-picker paths, where submitting is what creates the
+   * record.
+   */
+  existingDocId?: string;
+}
+
 interface Props {
   initialState?: SessionState;
+  /**
+   * Open the project setup modal on mount, for a record that already exists.
+   *
+   * The snap handoff's entry point. `ImportHandoff` has already saved the batch and ACKed the sender by
+   * the time this shell mounts, so what is left is the configuration step — and deliberately only that:
+   * the document is **not** loaded until submit, because owners have to go into the session seed and
+   * `ensureSession` aborts against a room that already exists.
+   */
+  initialProjectSetup?: PendingProject & { existingDocId: string };
   userEmail?: string;
   onSignOut?: () => void;
 }
 
-export default function AppShell({ initialState, userEmail, onSignOut }: Props) {
+export default function AppShell({
+  initialState,
+  initialProjectSetup,
+  userEmail,
+  onSignOut,
+}: Props) {
   const [data, setData] = useState<ParsedQAFile | null>(() => initialState?.data ?? null);
   const [filename, setFilename] = useState<string | null>(() => initialState?.filename ?? null);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
@@ -130,8 +170,13 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   const [sectionReviewers, setSectionReviewers] = useState<Record<string, string>>(
     () => initialState?.sectionReviewers ?? {}
   );
-  // Read here, never written here: the dashboard owns this map. The inspector needs it because a
-  // project's owners are the only people its sections may be handed to — see `assignableMembers`.
+  // The open project's owners. The inspector needs them because a project's owners are the only people
+  // its sections may be handed to — see `assignableMembers` — and since the header's team panel now
+  // edits that roster, this view *writes* the map as well as reading it.
+  //
+  // Two writers on one node is safe by construction, not by luck: `setProjectAssignees` is a per-key
+  // merge patch, writing each id as `true` or an explicit `null`, so this view and the dashboard
+  // changing different owners at the same moment say nothing about each other's keys.
   const [projectAssignees, setProjectAssignees] = useState<Record<string, true>>(
     () => initialState?.projectAssignees ?? {}
   );
@@ -175,6 +220,23 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   // neither empty nor loaded. "missing" is a link whose doc is gone, which needs saying out loud —
   // it used to be indistinguishable from having opened nothing at all.
   const [sharedDocState, setSharedDocState] = useState<"none" | "loading" | "missing">("none");
+
+  // ── Creating a project ──
+  //
+  // Owned here rather than in either view because two places start the same flow: the dashboard's New
+  // project button and the Projects dropdown in the header. The shell is the only parent they share, so
+  // it holds the one file input and renders the one modal.
+  //
+  // The file is staged already *parsed* — a file that cannot be read is refused before anybody is asked
+  // to give it a due date and a team. Non-null is what opens the modal.
+  const newProjectInputRef = useRef<HTMLInputElement>(null);
+  const [pendingProject, setPendingProject] = useState<PendingProject | null>(
+    () => initialProjectSetup ?? null
+  );
+  const [creatingProject, setCreatingProject] = useState(false);
+  // Reported inside the modal, not through `showError`: the modal stays open so the file can be
+  // changed, and `.write-toast` is z-index 100 against `.p-modal`'s 150, so a toast would be behind it.
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // One notification for the whole app. Stable, so callbacks that take it do not churn.
   const showError = useCallback((title: string, message: string) => {
@@ -311,17 +373,10 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
    * The signed-in user's team-bank entry, or null before it arrives (or if they are not in the bank).
    *
    * Approving is the section reviewer's to do, so the cards need to know which `TeamMember.id` "me"
-   * is. Matched on email rather than by sanitizing `userEmail` into a key here, which would be a
-   * second copy of `teamBank`'s codec — the same mistake `encodeKey` exists to prevent. `OverviewView`
-   * resolves itself the same way.
+   * is. Through `findMemberByEmail`, which `OverviewView` also calls — this used to be a copy of the
+   * same `find` in each of the two views, and two places for "which member am I" is one too many.
    */
-  const me = useMemo(
-    () =>
-      userEmail
-        ? teamMembers.find((m) => m.email.toLowerCase() === userEmail.toLowerCase()) ?? null
-        : null,
-    [teamMembers, userEmail]
-  );
+  const me = useMemo(() => findMemberByEmail(teamMembers, userEmail), [teamMembers, userEmail]);
 
   /**
    * Who this project's sections may be handed to: its owners, and nobody else.
@@ -465,7 +520,22 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setProjectAssignees({});
   }, []);
 
-  const handleLoad = useCallback((loaded: ParsedQAFile, name: string, loadedDocId: string) => {
+  /**
+   * Open a document that is already in the bank, and seed its room.
+   *
+   * Deliberately does **no saving** — every caller hands it a doc that is already stored, so the id it
+   * is given is the one thing it must not invent. `initialOwnerIds` is for a project created a moment
+   * ago with its team already chosen: it goes into the *seed*, because `ensureSession`'s transaction
+   * aborts against a node that already exists, so writing `projectAssignees` separately beforehand
+   * would leave the room with no data, no filename and no `sectionAlgoVersion`. Empty for every other
+   * caller, which is every project that is not brand new.
+   */
+  const handleLoad = useCallback((
+    loaded: ParsedQAFile,
+    name: string,
+    loadedDocId: string,
+    initialOwnerIds: string[] = []
+  ) => {
     setData(loaded);
     setFilename(name);
     // Only when this is a *different* doc. Re-opening the doc already on screen — which is what clicking
@@ -490,7 +560,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     // there is nothing here for the person who loaded it to fix — but the seed is what carries this
     // doc into its room, and discarding the news that it failed is what let someone hand out a share
     // link that could only ever open onto nothing.
-    ensureSession(loadedDocId, newSessionState(loaded, name)).catch(() =>
+    ensureSession(loadedDocId, newSessionState(loaded, name, initialOwnerIds)).catch(() =>
       showError(
         "Live sharing may not be ready",
         "This file is open and your changes are kept, but the shared session for it could not be started. People opening the share link may not see your edits until you reload this page."
@@ -597,14 +667,20 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
   /**
    * Address a write to the open doc's room.
    *
-   * An open doc is always a session, so this is the one place that still checks: the postMessage
-   * import path renders AppShell with `initialState` and no doc id, and it cannot be given one
-   * without editing that receiver. Everywhere else `docId` is set and the write goes through
-   * unconditionally.
+   * An open doc is always a session, so the guard below is now a guard against a *window* rather than
+   * against a whole entry point. The postMessage import path used to mount with `initialState` and no
+   * doc id at all, which made every write through here a silent no-op for the life of that tab; it now
+   * gets a real id from the project setup submit. What is left is the gap before that submit — the
+   * handoff's document is on screen behind the modal, and the modal is what produces the id.
    *
-   * All 14 change callbacks funnel through here, which makes it the single place to notice a
-   * rejected write. Local state has already been updated by the time the rejection arrives, so the
+   * Every change callback funnels through here, which makes it the single place to notice a
+   * rejected write. All but one have already updated local state by the time the rejection arrives, so the
    * change stays on screen and the toast is the only signal that it may not have persisted.
+   *
+   * The exception is `handleChangeProjectOwners`, which patches nothing locally: owners live in a map
+   * this view subscribes to, and RTDB raises the local snapshot for a local write before the server
+   * confirms it, so the echo updates the screen within a tick. Patching as well would just be a second
+   * source for the same value. That is the same rule the dashboard's `handleChangeOwners` follows.
    */
   const writeToSession = useCallback(
     (write: (sessionId: string) => Promise<unknown>) => {
@@ -623,6 +699,18 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     setRatings((prev) => ({ ...prev, [id]: rating }));
     writeToSession((sid) => updateRating(sid, id, rating));
   }, [writeToSession]);
+
+  /**
+   * Replace the open project's owners, from the header's team panel.
+   *
+   * No optimistic local patch, deliberately — see `writeToSession` above. `previous` is the tombstone
+   * list and is not optional: `setProjectAssignees` removes an owner only by writing their key as an
+   * explicit `null`, so without it removals would appear to work and then quietly not happen.
+   */
+  const handleChangeProjectOwners = useCallback((memberIds: string[]) => {
+    const previous = ownerIdsFrom(projectAssignees);
+    writeToSession((sid) => writeProjectAssignees(sid, memberIds, previous));
+  }, [projectAssignees, writeToSession]);
 
   const handleClearRating = useCallback((id: string) => {
     setRatings((prev) => {
@@ -769,6 +857,158 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
     },
     [handleLoad, handleChangeView, showError]
   );
+
+  /** Open the file picker. The modal follows once a file has been picked and parsed. */
+  const handleNewProject = useCallback(() => {
+    setCreateError(null);
+    newProjectInputRef.current?.click();
+  }, []);
+
+  /**
+   * A file has been picked: read and parse it before anything else.
+   *
+   * Parsing here rather than on submit is what keeps the modal honest — nobody is asked to schedule and
+   * staff a file that was never going to load. The failure goes to the app-wide toast, which sits
+   * outside the view switch and so is visible from either tab.
+   */
+  const handleNewProjectFileChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset first, so picking the same file again re-fires `change` — including after a failure,
+      // which is exactly when somebody retries the same path.
+      e.target.value = "";
+      if (!file) return;
+
+      readJsonFile(file)
+        .then((data) => {
+          setCreateError(null);
+          setPendingProject({ filename: file.name, data });
+        })
+        .catch((err: unknown) =>
+          showError(
+            "That file could not be used",
+            err instanceof Error ? err.message : "Failed to parse file."
+          )
+        );
+    },
+    [showError]
+  );
+
+  /**
+   * Submit the setup modal: create the project if it does not exist yet, configure it if it does, then
+   * open it either way.
+   *
+   * The two halves differ only in who writes the record. From a picked file, `createProject` writes it
+   * here, name and due date and all, in one atomic create — so a name the reader changed in the modal
+   * costs nothing extra, it is simply the name the record is minted with. From the snap handoff the
+   * record was already written — `ImportHandoff` saves on accept so it can ACK the sender without
+   * waiting on a human — so there is nothing to create, the due date goes through `setDueDate`, and a
+   * changed name has to be an edit to a record that already exists.
+   *
+   * What both halves share is the part that matters: the owners are never written separately. They are
+   * handed to `handleLoad`, which puts them in the session seed, because `ensureSession` aborts against a
+   * room that already exists. That is also why the handoff does not open its document until this point.
+   */
+  const handleSubmitProject = useCallback(
+    ({ filename: name, dueDate, ownerIds }: NewProjectValues) => {
+      if (!pendingProject) return;
+      const { data, existingDocId } = pendingProject;
+
+      setCreatingProject(true);
+      setCreateError(null);
+
+      const open = (docId: string) => {
+        handleLoad(data, name, docId, ownerIds);
+        handleChangeView("inspector");
+        setPendingProject(null);
+      };
+
+      if (existingDocId) {
+        // The due date is the only thing left to write on the record itself. Not awaited before opening:
+        // the project is already saved and the room is what the reader is waiting for, so a slow or
+        // failed date write should not hold the document shut.
+        setDueDate(existingDocId, dueDate).catch(() =>
+          showError(
+            "The due date may not have saved",
+            "The project is open and everything else was kept, but its due date may not have reached the server. Set it again from the Overview dashboard to be sure."
+          )
+        );
+
+        // The rename is the exception, and it *is* awaited. Unlike the date it can be refused — another
+        // project may already own the name — and the answer to that is the same as on the create path:
+        // keep the modal open with the reason, so the name can be changed. Opening first and reporting
+        // afterwards would leave the project on screen under a name it was not saved with.
+        //
+        // Skipped entirely when the name is untouched, so the ordinary handoff still opens without
+        // waiting on a read of the bank.
+        if (name === pendingProject.filename) {
+          open(existingDocId);
+          setCreatingProject(false);
+          return;
+        }
+
+        renameSavedFile(existingDocId, name)
+          .then((result) => {
+            if (!result.ok) {
+              setCreateError(
+                `A different project is already called "${name}". Choose another name, or remove that project first.`
+              );
+              return;
+            }
+            open(existingDocId);
+          })
+          .catch(() =>
+            setCreateError("The project could not be renamed, so it was left as it was. Try again.")
+          )
+          .finally(() => setCreatingProject(false));
+        return;
+      }
+
+      // A rejection leaves the modal open with the reason, because in every rejecting case there is
+      // nothing to open: `duplicate` means this document is already a project, and `filenameConflict`
+      // means a *different* document owns the name, whose room holds somebody else's work.
+      createProject({ filename: name, data, dueDate })
+        .then((result) => {
+          if (!result.ok) {
+            setCreateError(
+              result.reason === "duplicate"
+                ? `This file is already saved as a project. Open it from the project list instead, or pick a different file.`
+                : `A different project is already called "${name}". Choose another name, or remove that project first.`
+            );
+            return;
+          }
+          open(result.id);
+        })
+        .catch(() =>
+          setCreateError("The project could not be saved for the team, so it was not created.")
+        )
+        .finally(() => setCreatingProject(false));
+    },
+    [pendingProject, handleLoad, handleChangeView, showError]
+  );
+
+  /**
+   * Close the setup modal without going ahead.
+   *
+   * For a picked file that is all it is — nothing was written. For the handoff it is a discard: the
+   * record is already in the bank, so backing out has to take it back out again, or an abandoned batch
+   * would sit on the dashboard as a project with no due date and no owners. The button says "Discard
+   * batch" on that path rather than "Cancel", because this is destructive and the snap has already been
+   * told the batch was saved.
+   */
+  const handleCancelProject = useCallback(() => {
+    const existingDocId = pendingProject?.existingDocId;
+    setPendingProject(null);
+    setCreateError(null);
+    if (!existingDocId) return;
+
+    removeSavedFile(existingDocId).catch(() =>
+      showError(
+        "The batch may not have been discarded",
+        "It could not be removed from the shared list. Check your connection, then remove it from the Overview dashboard."
+      )
+    );
+  }, [pendingProject, showError]);
 
   /** The three tallies the top bar reports, counted once over the whole file. */
   const stateCounts = useMemo(() => {
@@ -932,6 +1172,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
             totalCount={data?.items.length ?? 0}
             onLoad={handleLoad}
             teamMembers={teamMembers}
+            assignableMembers={assignableMembers}
+            onChangeProjectOwners={handleChangeProjectOwners}
             docId={docId}
             editedAnswers={editedAnswers}
             ratings={ratings}
@@ -939,6 +1181,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
             onError={showError}
             onDocRemoved={handleDocRemoved}
             onExported={handleExported}
+            onNewProject={handleNewProject}
           />
         )}
 
@@ -948,6 +1191,7 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               teamMembers={teamMembers}
               userEmail={userEmail}
               onOpenProject={handleOpenProject}
+              onNewProject={handleNewProject}
               openingProjectId={openingProjectId}
               onError={showError}
               refreshKey={overviewRefreshKey}
@@ -1061,7 +1305,8 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
               <i className="p-icon--file p-icon--xx-large"></i>
               <h2 className="p-heading--2">No file loaded</h2>
               <p className="u-text--muted">
-                Use the file loader above to open a JSON results file and start exploring Q&amp;A pairs.
+                Use <strong>Projects</strong> above to open a saved project, or start a new one from
+                there or from the Overview dashboard.
               </p>
               <div className="p-card no-file-state__example">
                 <p><strong>Expected JSON format:</strong></p>
@@ -1089,6 +1334,34 @@ export default function AppShell({ initialState, userEmail, onSignOut }: Props) 
           </div>
         )}
       </div>
+
+      {/* The one file input for creating a project, driven by both the dashboard's New project button
+          and the header's Projects dropdown. Outside the view switch so neither view's mounting state
+          can take it away mid-pick. */}
+      <input
+        ref={newProjectInputRef}
+        type="file"
+        accept=".json,application/json"
+        onChange={handleNewProjectFileChange}
+        className="u-hide"
+      />
+
+      {/* Mounted only while a project is staged, so each open starts from a clean due date and team. */}
+      {pendingProject && (
+        <NewProjectModal
+          filename={pendingProject.filename}
+          data={pendingProject.data}
+          teamMembers={teamMembers}
+          myMemberId={me?.id ?? null}
+          error={createError}
+          submitting={creatingProject}
+          onSubmit={handleSubmitProject}
+          onCancel={handleCancelProject}
+          // Backing out of a handed-off batch deletes the record that was already saved for it, so the
+          // button says what it does.
+          cancelLabel={pendingProject.existingDocId ? "Discard batch" : undefined}
+        />
+      )}
 
       {/* Failure notice. Stays until dismissed, because something that did not persist is worth
           noticing rather than something to let fade away. */}

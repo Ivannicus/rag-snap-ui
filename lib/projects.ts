@@ -66,12 +66,33 @@ export function sameOverlays(a: ProjectOverlays, b: ProjectOverlays): boolean {
  * Every listener returns `onValue`'s own unsubscribe rather than calling `off(path)`, which would
  * detach every listener registered at that path and so take down a second subscription to the same
  * project — the bug already fixed in `subscribeToSession` and `subscribeToSavedFiles`.
+ *
+ * ## The one guaranteed call
+ *
+ * `onUpdate` fires **once** as soon as all five listeners have delivered a first snapshot, whether or
+ * not anything differed from `EMPTY_OVERLAYS`. That one exception to the change filter is what lets a
+ * caller tell "this project has no assignments" apart from "this project has not answered yet".
+ *
+ * Without it a room with no `sectionAssignees` and no `projectAssignees` — a project nobody has staffed,
+ * or one whose room was never seeded — reports `{}` for every key, `sameMap` finds no change, and
+ * `onUpdate` is never called at all. The dashboard's grid does not care, because it falls back to
+ * `EMPTY_OVERLAYS` and draws the same thing either way. `MyAssignments` does: an unanswered project and
+ * an unstaffed one are indistinguishable from its side, so it would say "nothing is assigned to you"
+ * while the answer was still on its way.
+ *
+ * It is one extra call per project on mount, not five — the settle is reported after the *last* key
+ * arrives, and the four before it are swallowed as usual. So this costs one state update per project
+ * where the grid previously got none, and nothing at all once the subscription is warm.
  */
 export function subscribeToProjectOverlays(
   projectId: string,
   onUpdate: (overlays: ProjectOverlays) => void
 ): () => void {
   const current: ProjectOverlays = { ...EMPTY_OVERLAYS };
+  // Which keys have delivered a first snapshot. A Set of keys rather than a countdown, because a key
+  // that fires twice before another has fired once must not be counted twice — that would report a
+  // settle while a map was still outstanding, which is the very state this is here to rule out.
+  const settled = new Set<keyof ProjectOverlays>();
 
   const unsubscribes = OVERLAY_KEYS.map((key) =>
     onValue(ref(db, `sessions/${projectId}/${key}`), (snapshot) => {
@@ -79,9 +100,20 @@ export function subscribeToProjectOverlays(
       // `projectAssignees` is keyed by TeamMember.id, which is a sanitized email and needs no
       // decoding. Every other map is keyed by an item or section id and does.
       const decoded = key === 'projectAssignees' ? val : decodeKeys(val);
-      if (sameMap(current[key] as Record<string, unknown>, decoded)) return;
-      (current as any)[key] = decoded;
-      onUpdate({ ...current });
+      const changed = !sameMap(current[key] as Record<string, unknown>, decoded);
+      if (changed) (current as any)[key] = decoded;
+
+      if (!settled.has(key)) {
+        settled.add(key);
+        // The last of the five: report regardless of `changed`, and return so a snapshot that also
+        // carried a change does not report twice for it.
+        if (settled.size === OVERLAY_KEYS.length) {
+          onUpdate({ ...current });
+          return;
+        }
+      }
+
+      if (changed) onUpdate({ ...current });
     })
   );
 
@@ -165,9 +197,22 @@ export function resolveMembers(ids: string[], teamMembers: TeamMember[]): TeamMe
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Owner ids from the raw `projectAssignees` map.
+ *
+ * Split out from `ownerIdsOf` because the inspector holds that map on its own — `AppShell` keeps it as
+ * session state and has no `ProjectOverlays` to hand — and it now needs the array form to build the
+ * tombstone list for a `setProjectAssignees` write. One implementation, so the **truthiness** test
+ * cannot drift: a strict `=== true` here would silently disagree with the dashboard's own owner list
+ * over anything but a literal boolean.
+ */
+export function ownerIdsFrom(projectAssignees: Record<string, true>): string[] {
+  return Object.keys(projectAssignees).filter((id) => projectAssignees[id]);
+}
+
 /** Owner ids for a project, as a plain array. */
 export function ownerIdsOf(overlays: ProjectOverlays): string[] {
-  return Object.keys(overlays.projectAssignees).filter((id) => overlays.projectAssignees[id]);
+  return ownerIdsFrom(overlays.projectAssignees);
 }
 
 export interface AssignmentEntry {

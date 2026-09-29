@@ -4,8 +4,17 @@ import { assignmentsForMember } from "@/lib/projects";
 import type { ProjectSummary, TeamMember } from "@/lib/types";
 
 interface Props {
-  /** The signed-in user's team-bank entry, or null if they are not in the bank yet. */
+  /** The signed-in user's team-bank entry, or null if the bank does not hold them. */
   me: TeamMember | null;
+  /**
+   * True while `me` being null is not yet an answer — the team bank has not arrived.
+   *
+   * Without this a null `me` had exactly one reading, and it was the wrong one for the first moment of
+   * every dashboard open: a reader who *is* in the bank was told they were not in it.
+   */
+  identityPending: boolean;
+  /** True while any project's assignment overlays are still outstanding. See `overlaysPending`. */
+  overlaysPending: boolean;
   projects: ProjectSummary[];
   onOpenProject: (projectId: string) => void;
 }
@@ -21,7 +30,24 @@ interface Props {
  * item count, which is not denormalized into project metadata — and loading a document to work it out
  * is exactly what the dashboard may not do.
  */
-export default function MyAssignments({ me, projects, onOpenProject }: Props) {
+export default function MyAssignments({
+  me,
+  identityPending,
+  overlaysPending,
+  projects,
+  onOpenProject,
+}: Props) {
+  // Identity first: everything below is a statement about one person, so there is nothing truthful to
+  // say until it is settled which person that is.
+  if (identityPending) {
+    return (
+      <p className="u-text--muted u-no-margin--bottom my-assignments__empty">
+        <i className="p-icon--spinner u-animation--spin" aria-hidden></i> Checking what is assigned to
+        you…
+      </p>
+    );
+  }
+
   if (!me) {
     return (
       <div className="p-notification--information u-no-margin--bottom">
@@ -41,7 +67,15 @@ export default function MyAssignments({ me, projects, onOpenProject }: Props) {
   );
 
   if (entries.length === 0) {
-    return (
+    // Only a statement once the overlays it would be read from are actually in. A project waiting on
+    // its overlays looks exactly like one nobody is assigned to, so saying "nothing" early is not a
+    // slower version of the right answer — it is the wrong one.
+    return overlaysPending ? (
+      <p className="u-text--muted u-no-margin--bottom my-assignments__empty">
+        <i className="p-icon--spinner u-animation--spin" aria-hidden></i> Checking what is assigned to
+        you…
+      </p>
+    ) : (
       <p className="u-text--muted u-no-margin--bottom my-assignments__empty">
         Nothing is assigned to you right now.
       </p>
@@ -52,10 +86,13 @@ export default function MyAssignments({ me, projects, onOpenProject }: Props) {
 
   return (
     <div className="my-assignments">
+      {/* Named, not just "yours". Two people can have this dashboard open side by side and the lists
+          differ, so saying whose it is makes a wrong identity visible instead of plausible. */}
       <p className="u-text--muted p-text--small my-assignments__summary">
-        {entries.length} {entries.length === 1 ? "project" : "projects"}
+        {me.name} — {entries.length} {entries.length === 1 ? "project" : "projects"}
         {totalSections > 0 &&
           `, ${totalSections} ${totalSections === 1 ? "section" : "sections"} to answer`}
+        {overlaysPending && " (still loading)"}
       </p>
 
       <ul className="p-list--divided u-no-margin--bottom">

@@ -5,6 +5,7 @@ import { onAuthStateChanged, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { signOutUser } from "@/lib/auth";
 import { saveFile } from "@/lib/savedFiles";
+import { ensureTeamMember } from "@/lib/teamBank";
 import { newSessionState } from "@/lib/session";
 import { parseQAFile } from "@/lib/utils";
 import {
@@ -20,7 +21,7 @@ import type { ParsedQAFile, SessionState } from "@/lib/types";
 import AppShell from "@/components/AppShell";
 import LoginScreen from "@/components/LoginScreen";
 
-type Status = "waiting" | "needs-auth" | "saving" | "loaded" | "error";
+type Status = "waiting" | "needs-auth" | "saving" | "loaded" | "duplicate" | "error";
 
 interface Sender {
   win: MessageEventSource;
@@ -37,6 +38,10 @@ export default function ImportHandoff() {
   const [status, setStatus] = useState<Status>("waiting");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [loadedState, setLoadedState] = useState<SessionState | null>(null);
+  // The saved record this batch became, handed to the shell so it can open the setup modal over it.
+  const [savedDocId, setSavedDocId] = useState<string | null>(null);
+  // The project this batch turned out to already be, for the "already saved" branch.
+  const [duplicateOf, setDuplicateOf] = useState<{ id: string; filename: string } | null>(null);
 
   // The single nonce this tab was opened with; the payload must match it and it is spent on accept.
   const expectedNonce = useRef<string>("");
@@ -48,7 +53,21 @@ export default function ImportHandoff() {
 
   // Observe auth state (same three-state pattern as AuthGate).
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      // Make sure whoever is importing is in the team bank, so the setup modal can preselect them as an
+      // owner of what they are about to create. `ensureTeamMember` is otherwise only called from
+      // `signInWithGoogle`, so somebody arriving here on a session Firebase restored — which is the
+      // ordinary case for a returning snap user — is never checked, and a missing entry would leave them
+      // unable to be put on their own project. Idempotent, and a failure only costs the preselect.
+      if (u?.email) {
+        void ensureTeamMember({
+          name: u.displayName ?? u.email,
+          email: u.email,
+          photoURL: u.photoURL ?? undefined,
+        }).catch(() => {});
+      }
+    });
     return unsubscribe;
   }, []);
 
@@ -70,14 +89,27 @@ export default function ImportHandoff() {
     [reply]
   );
 
-  // Persist the accepted batch to the shared savedFiles bank, then ACK + load into view.
-  // Only call this once the user is authenticated.
+  /**
+   * Persist the accepted batch to the shared savedFiles bank, then ACK and hand it to the shell.
+   *
+   * Saving happens here, before anyone is asked for a due date or a team, so the sender is released as
+   * soon as the write lands rather than waiting on a human filling in a form. The shell then opens its
+   * setup modal over the record this created — see `initialProjectSetup`.
+   *
+   * `saveFile` does **not** throw for the two outcomes that write nothing; it returns them. Reading the
+   * result is therefore what keeps the ACK honest: this used to `await` it and discard it, so a duplicate
+   * or a filename clash — both of which store nothing — were reported to the sender as a durable save.
+   *
+   * Only call this once the user is authenticated.
+   */
   const persist = useCallback(
     async (data: ParsedQAFile, filename: string, nonce: string) => {
       const email = auth.currentUser?.email ?? "";
       setStatus("saving");
+
+      let result;
       try {
-        await saveFile({
+        result = await saveFile({
           filename,
           data,
           uploadedByName: auth.currentUser?.displayName ?? email ?? "Unknown",
@@ -89,9 +121,32 @@ export default function ImportHandoff() {
         setStatus("error");
         return;
       }
+
+      if (!result.ok) {
+        if (result.reason === "filenameConflict") {
+          // Nothing was written, so this must not be ACKed. A different document already owns this name,
+          // and its room holds somebody else's work, so there is nothing safe to open either.
+          replyError(nonce, "INTERNAL", `A different project is already saved as "${filename}".`);
+          setErrorMsg(
+            `A different project is already saved as "${filename}". Rename the manifest in the snap, or remove the saved project first, then hand off again.`
+          );
+          setStatus("error");
+          return;
+        }
+
+        // Duplicate content: this exact document is in the bank already, so the batch *is* durably
+        // stored and the ACK is true. There is nothing to create and nothing to configure — offer the
+        // project it turned out to be.
+        reply(makeAck(nonce));
+        setDuplicateOf({ id: result.existingId, filename });
+        setStatus("duplicate");
+        return;
+      }
+
       // ACK only after the write durably succeeds.
       reply(makeAck(nonce));
       setLoadedState(newSessionState(data, filename));
+      setSavedDocId(result.id);
       setStatus("loaded");
     },
     [reply, replyError]
@@ -196,13 +251,48 @@ export default function ImportHandoff() {
     }
   }, [user, loadedState, persist]);
 
-  if (status === "loaded" && loadedState) {
+  if (status === "loaded" && loadedState && savedDocId) {
     return (
       <AppShell
         initialState={loadedState}
+        // Opens the project setup modal over the batch, for the due date and team. The record already
+        // exists, so the shell configures it rather than creating it again.
+        initialProjectSetup={{
+          filename: loadedState.filename,
+          data: loadedState.data,
+          existingDocId: savedDocId,
+        }}
         userEmail={user && user !== "loading" ? user.email ?? "" : ""}
         onSignOut={signOutUser}
       />
+    );
+  }
+
+  if (status === "duplicate" && duplicateOf) {
+    return (
+      <div className="p-strip is-shallow">
+        <div className="row">
+          <div className="col-6 col-start-large-4">
+            <div className="p-notification--information">
+              <div className="p-notification__content">
+                <h5 className="p-notification__title">Already a project</h5>
+                <p className="p-notification__message">
+                  These results are already saved as a project, so nothing was added a second time.
+                </p>
+              </div>
+            </div>
+            {/* Handed to the app's own share-link entry rather than mounting a shell here: `?doc=` already
+                fetches the document, routes it through `handleLoad` — which seeds the room if this project
+                never got one — and lands on the collaborative view. */}
+            <a
+              href={`/?doc=${encodeURIComponent(duplicateOf.id)}`}
+              className="p-button--positive u-no-margin--bottom"
+            >
+              Open that project
+            </a>
+          </div>
+        </div>
+      </div>
     );
   }
 
