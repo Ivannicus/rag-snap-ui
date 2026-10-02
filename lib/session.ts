@@ -84,8 +84,27 @@ function mapLegacyApprovals(node: unknown): Record<string, ItemStatus> {
  * One place to build this, so that adding an overlay map cannot leave a caller seeding a session that
  * is missing it. Both callers — opening a document, and receiving a handed-off batch — used to spell
  * the literal out themselves.
+ *
+ * `ownerIds` is how a project created with its team already chosen gets those owners: they are part of
+ * the seed rather than a write that follows it. That ordering is not a preference. `ensureSession`
+ * seeds in a `runTransaction` that **aborts when the node already exists**, so writing
+ * `projectAssignees` first would create `sessions/<id>`, the seed would then abort, and the room would
+ * be left with no `data`, no `filename` and no `sectionAlgoVersion` — a room the inspector cannot
+ * read. Seeded here, it is one atomic write with no race.
+ *
+ * Takes `string[]` and converts internally, deliberately: `string[]` is what every signature in the
+ * app deals in (`setProjectAssignees`, `TeamMemberMultiSelect`'s `value`) and `Record<string, true>`
+ * is only the storage shape, so this is the single place the two meet going in — as `ownerIdsOf` in
+ * `lib/projects.ts` is the single place they meet coming out.
  */
-export function newSessionState(data: ParsedQAFile, filename: string): SessionState {
+export function newSessionState(
+  data: ParsedQAFile,
+  filename: string,
+  ownerIds: string[] = []
+): SessionState {
+  const projectAssignees: Record<string, true> = {};
+  for (const id of ownerIds) projectAssignees[id] = true;
+
   return {
     data,
     filename,
@@ -93,7 +112,7 @@ export function newSessionState(data: ParsedQAFile, filename: string): SessionSt
     ratings: {},
     contextUrls: {},
     itemStatus: {},
-    projectAssignees: {},
+    projectAssignees,
     sectionAssignees: {},
     sectionReviewers: {},
   };
@@ -190,6 +209,38 @@ export function subscribeToSession(
       });
     }
   });
+}
+
+/**
+ * The overlay maps for one room, read once.
+ *
+ * What an export needs (`editedAnswers`, `ratings`, `contextUrls`) plus `itemStatus`, so a caller can
+ * say how much of the project is signed off before it exports it. Not `SessionState`: there is no
+ * document here, and the rest of a session — assignment, the algorithm stamp — is the open view's
+ * business, not an exporter's.
+ *
+ * One-shot rather than `subscribeToSession`, because this is for somebody exporting a project they
+ * have *not* opened, from the file loader. A listener would be a room joined and left for the length
+ * of one click.
+ *
+ * Decoded through the same `decodeKeys`, and with the same `approvals` fallback, as the live
+ * subscription — a room approved before the `itemStatus` rename must not export as though nobody had
+ * reviewed it.
+ */
+export async function getSessionOverlays(sessionId: string): Promise<{
+  editedAnswers: Record<string, string>;
+  ratings: Record<string, number>;
+  contextUrls: Record<string, string>;
+  itemStatus: Record<string, ItemStatus>;
+}> {
+  const snapshot = await get(ref(db, `sessions/${sessionId}`));
+  const val = snapshot.val() ?? {};
+  return {
+    editedAnswers: decodeKeys(val.editedAnswers ?? {}),
+    ratings: decodeKeys(val.ratings ?? {}),
+    contextUrls: decodeKeys(val.contextUrls ?? {}),
+    itemStatus: decodeKeys(val.itemStatus ?? mapLegacyApprovals(val.approvals)),
+  };
 }
 
 export function updateAnswer(sessionId: string, itemId: string, answer: string) {

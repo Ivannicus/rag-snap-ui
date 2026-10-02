@@ -147,6 +147,16 @@ export interface SavedFileMeta {
   uploadedByName: string;
   uploadedByEmail: string;
   uploadedAt: number;
+  /**
+   * When this project was last exported, and by whom. Null on a project nobody has exported.
+   *
+   * Carried on the list metadata — not just on `ProjectMeta` for the dashboard — because the file
+   * loader offers Remove beside each row, and whether the results were ever taken off the system is
+   * exactly what someone about to remove one needs to know.
+   */
+  exportedAt: number | null;
+  exportedBy: string | null;
+  exportedByEmail: string | null;
 }
 
 export interface SavedFile extends SavedFileMeta {
@@ -227,6 +237,15 @@ export interface ProjectSummary {
  * Split from its payload so the completed list can be listed without transferring the archived
  * documents themselves. See `lib/archive.ts` for why.
  */
+/**
+ * Where a completed project's deal ended up, reported by hand after the export.
+ *
+ * `"pending"` is the default rather than a stored value: an entry written before this existed, or one
+ * nobody has reported on yet, has no `dealStatus` child at all, and "nobody has said yet" is exactly
+ * what pending means. So there is nothing to migrate and no such thing as an entry with no status.
+ */
+export type DealStatus = "won" | "lost" | "pending";
+
 export interface ArchivedProjectMeta {
   id: string;
   filename: string;
@@ -236,6 +255,8 @@ export interface ArchivedProjectMeta {
   itemCount: number;
   /** The `savedFiles` id this was exported from. May no longer exist. */
   sourceSessionId: string;
+  /** Always resolved — `listArchivedProjects` defaults a missing child to `"pending"`. */
+  dealStatus: DealStatus;
 }
 
 /** The heavy half of an archive entry, under `archivedProjects/payloads/<pushId>`. */

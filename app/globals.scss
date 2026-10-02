@@ -1,4 +1,3 @@
-@use "sass:color";
 @use "vanilla-framework";
 
 @include vanilla-framework.vanilla;
@@ -21,6 +20,25 @@
 // definition mixin so the glyph is not copied.
 .is-dark .p-icon--switcher-dashboard {
   @include vanilla-framework.vf-icon-switcher-dashboard(vanilla-framework.$colors--dark-theme--icon);
+}
+
+// How wide a project's name may draw before it ellipses, wherever it shares a line with other controls.
+//
+// One value rather than one per component, because the three places that render a name on a shared line
+// — the Collab UI header, a completed-project row, a My assignments row — are the same problem each
+// time: the name is the one item with no natural length, so uncapped it grows until it pushes, clips or
+// wraps whatever sits beside it. Capping each locally is how the three drift apart.
+//
+// Generous on purpose — about 45 characters at the sizes these render at — since the name is what tells
+// a reader which project they are looking at. It is a *maximum*, not a width: a shorter name takes only
+// the room it needs, and the cap is lifted where a name gets a line to itself (see the narrow-screen
+// rules on `.completed-row`).
+//
+// `.project-list__filename-text` and `.project-card__filename` deliberately do not read it. Both are
+// already bounded by a fixed grid track or a card's own width, which is a tighter limit than this and
+// the right one for them.
+:root {
+  --project-name-max: 24rem;
 }
 
 .login-screen {
@@ -63,9 +81,41 @@
 .header-meta__left {
   display: flex;
   flex-wrap: nowrap;
-  flex-shrink: 0;
   align-items: center;
   gap: 0rem;
+  // Shrinkable, and `min-width: 0` so it may go below its content width. It used to be
+  // `flex-shrink: 0`, which is what made a long project name push the whole right-hand half of the
+  // row out of `.header-meta` and into a horizontal scroll. Only the filename gives way — the
+  // Projects button holds its size below.
+  min-width: 0;
+
+  > .file-loader {
+    flex: none;
+  }
+}
+
+// The open project's name. Two limits, because one is not enough:
+//
+// - `max-width` caps it on a wide screen, where there is slack in the row and nothing would force it
+//   to shrink. Generous on purpose — around 45 characters at this font size — since the name is the
+//   one thing in the header that identifies what you are looking at.
+// - shrinking below that cap is what keeps a narrow window working. With the cap alone, a 24rem badge
+//   plus the buttons and the four tallies still overflows a 1280px row.
+//
+// `min-width` is the floor: clipped to a few characters a name says nothing, so below that the row
+// goes back to scrolling (`.header-meta`'s `overflow-x`), which is the pre-existing behaviour for a
+// window too narrow for its contents rather than a regression.
+.header-meta__filename {
+  max-width: var(--project-name-max);
+  min-width: 6rem;
+}
+
+// `overflow: hidden` is also what lets this shrink at all: a flex item's automatic minimum size is
+// its content, and any `overflow` other than `visible` drops that to zero.
+.header-meta__filename-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-meta__right {
@@ -99,7 +149,7 @@
   }
 }
 
-// One set of metrics for every control in the header row, so Manage Users, Load a JSON file, the
+// One set of metrics for every control in the header row, so Manage Team Members, Projects, the
 // filename badge, Copy doc link, and Export CSV are all the same size rather than coincidentally
 // close. Sizing is border-box, so the borders that differ between button variants and the badge
 // cannot change the rendered height. Scoped to the header so the badge keeps its own size in
@@ -151,7 +201,7 @@
   flex-shrink: 0;
   // Flex, like .file-loader, so the button is not an inline child in a block box. As an inline
   // child it picked up line-height leading, which made the wrapper taller than the button and left
-  // Manage Users sitting a couple of pixels high relative to its neighbours.
+  // the trigger sitting a couple of pixels high relative to its neighbours.
   display: flex;
   align-items: center;
 }
@@ -161,6 +211,45 @@
   top: calc(100% + 0.5rem);
   left: 0;
   z-index: 20;
+  width: 20rem;
+}
+
+// Headings for the two lists in the project team panel, which the bank panel does not need because it
+// only ever shows one list.
+.project-team__heading {
+  margin-bottom: 0.5rem;
+
+  // Space above every heading but the first, which sits directly under the panel's own padding. Gives
+  // the "Add to project" block air from the list above it without a second border — the
+  // `p-list--divided` above it already ends in one.
+  &:not(:first-child) {
+    margin-top: 1rem;
+  }
+}
+
+// The global user bank's trigger and panel, on the Overview dashboard. A sibling of
+// `.header-manage-users` rather than a reuse of it, because its panel has to be anchored and stacked
+// differently in this row — see both properties below.
+.manage-users {
+  position: relative;
+  flex-shrink: 0;
+  // Flex for the same reason `.header-manage-users` is: an inline button picks up line-height leading,
+  // which makes the wrapper taller than the button and leaves it sitting high against its neighbours.
+  display: flex;
+  align-items: center;
+}
+
+.manage-users__panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  // Anchored to its right edge, not its left. `.overview__tabs` sits at the right end of
+  // `.overview__head` (`justify-content: space-between`), so a 20rem panel opening rightwards from this
+  // button would run off the edge of the viewport.
+  right: 0;
+  // Above `.overview__bulk`, which is sticky at `z-index: 30` — at the 20 the header's copy of this
+  // panel uses, the bulk-assign bar drew over an open panel. Still below the header's 50 and the
+  // sidebar's 100.
+  z-index: 40;
   width: 20rem;
 }
 
@@ -220,6 +309,40 @@
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+
+// The new-project modal's fields. The same label-above-control column the dashboard's controls use
+// (`.overview__control`), stacked rather than in a row because a modal is narrow and both fields carry a
+// line of help text beneath them.
+.new-project__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.new-project__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  // Vanilla gives a `<label>` a `margin-bottom`, and these are a mix of labels and a div — left alone
+  // they would sit at different distances from the field below.
+  margin-bottom: 0;
+
+  input[type="date"] {
+    width: auto;
+    // Against the trigger of the team select below it, which is a fixed width.
+    min-width: 12rem;
+    margin-bottom: 0;
+  }
+
+  // Vanilla pulls a validation message up under the input it belongs to, which assumes the two are
+  // touching. Here the column's `gap` already provides that spacing, so the negative margin would lift
+  // the message onto the input's own line. The field swaps between this and a muted hint of the same
+  // size, so both have to sit at the same height or the dialog would shift as you empty the name.
+  .p-form-validation__message {
+    margin-top: 0;
+  }
 }
 
 .section-header {
@@ -548,7 +671,12 @@
 // either, and the page only comes back when the panel is dismissed.
 .team-member-select__panel {
   position: fixed;
-  z-index: 20;
+  // Above Vanilla's `.p-modal`, which is z-index 150. The panel is `position: fixed` at coordinates
+  // taken from its trigger, so inside a modal it already escapes the dialog box — but at the 20 it used
+  // to carry it lost the stacking contest and drew *behind* the dim backdrop, which made the team
+  // picker in the new-project modal unusable. Nothing in the app should ever cover an open dropdown, so
+  // this is raised globally rather than modified per context.
+  z-index: 200;
   width: 16rem;
   max-height: 20rem;
   overflow-x: hidden;
@@ -634,16 +762,56 @@
   }
 }
 
+// Two stacked rows, not one line. The meta row carries the id, the status badges and the chevron; the
+// question text gets a row of its own beneath it, the full width of the card. Laid out side by side the
+// text was a flex item bidding against the badges for width, so the same question wrapped at a different
+// point on a card that happened to carry three badges than on one that carried none — and the leftovers
+// of that contest were what squashed the chevron.
 .question-card__header {
   display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
   width: 100%;
   text-align: left;
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
+}
+
+.question-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+// The badges as one group, pushed to the right by `margin-left: auto` on the group rather than on
+// whichever badge happens to come first — which of them that is depends on the question's state.
+// The group is always in the markup, even when it is empty, so the chevron sits at the right edge
+// whether or not a card has any badges to show.
+.question-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+// One size on every card. Nothing in the meta row bids for its width now — the badges wrap instead of
+// shrinking, and the question text is no longer in this row at all — so the chevron simply holds its
+// 1rem square. `flex: none` keeps it that way if the badges ever do over-constrain the row: a flex item
+// shrinks by default, and because `%icon` paints the glyph as a `background-size: contain` image, a box
+// a few pixels narrower draws a visibly smaller arrow rather than clipping.
+//
+// Width and height together: the glyph's `viewBox` is square and scaled with `contain`, so it is bounded
+// by the smaller of the two and setting one alone would do nothing.
+.question-card__chevron {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
 }
 
 .question-card__id-badge {
@@ -661,7 +829,7 @@
 }
 
 .question-card__question {
-  flex: 1 1 auto;
+  width: 100%;
 }
 
 .question-card__body {
@@ -688,6 +856,129 @@
   flex-direction: column;
   gap: 0.75rem;
   padding-top: 0.75rem;
+}
+
+// The `underline` variant of `ModeToggle`: plain labels side by side, the selected one carrying a
+// thick bar beneath it. The counterpart of `.segmented-toggle`, which is the same component's other
+// look — behaviour is shared, none of the styling is.
+//
+// There is no Vanilla component styling to undo here, because the variant emits no `p-button--*` or
+// `p-segmented-control*` class at all: no fill, no border, no joined edge and no rounding arrive in
+// the first place. What is left to undo is only what Vanilla puts on a bare `button` element
+// (`_base_button.scss` extends every one of them with `%vf-button-base` and `vf-button-pattern`) — a
+// background, a border on all four sides, and a right and bottom margin.
+.underline-tabs__list {
+  display: flex;
+  // Between the labels, so between the bars as well; the bars are as wide as their own tab.
+  gap: 1.25rem;
+}
+
+// Two classes deep (0,2,0), which is what makes this a clean sweep rather than a fight. Vanilla sets
+// the background and border of a bare button again per state — `button:hover`, `button:active` and
+// `button[aria-pressed='true']`, all (0,1,1), and these buttons do carry `aria-pressed` — so a single
+// class would hold the resting state and lose the fill back on hover and on the selected tab. Two
+// classes beat all three outright, so unlike `.segmented-toggle` nothing needs restating per state.
+.underline-tabs .underline-tabs__tab {
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--vf-color-text-muted);
+  margin: 0;
+  // The bar's room, and a little to each side so it runs slightly past the text rather than stopping
+  // dead on the last letter.
+  padding: 0 0.25rem 0.5rem;
+
+  // A label belongs on one line. Vanilla's segmented-control buttons set this themselves, and dropping
+  // that class dropped it too — which is how the dashboard's labels came to stack under their icons the
+  // moment their half was a few pixels short. Pinned here rather than relied on from anywhere.
+  white-space: nowrap;
+
+  // The bar is always there and only ever changes colour. That is what guarantees the resting, hover and
+  // active bars are identical in thickness and position, and it means none of them appearing can shift
+  // the label above it or the answer box below.
+  //
+  // `transparent` is the base rather than the resting colour, because the disabled rules at the bottom
+  // of this block fall back to it: a disabled half wears no bar at all, and that is the one state the
+  // resting grey below must not reach.
+  border-bottom: 0.1875rem solid transparent;
+
+  // The unselected half carries a faint bar of its own, so the pair reads as a set of tabs at rest
+  // rather than as one underlined label beside some plain text. Shared by all three toggles — the
+  // dashboard's two and the question card's — each of which keeps its own *active* colour: brand orange
+  // where `--underline-tabs-bar` is set, near-black where it is not.
+  //
+  // `--vf-color-border-low-contrast` is the house light grey and, being alpha (`#0000001a`), it darkens
+  // whatever is behind it rather than assuming a background. That is what lets one value serve the
+  // answer toggle, which sits on cards tinted red, blue, green or amber by their status.
+  //
+  // Both `:not()`s are load-bearing, and neither is about specificity for its own sake:
+  //
+  // - `:not(.is-active)` means this is never a declaration on the selected tab, so it cannot fight
+  //   `.is-active` below — which is (0,3,0), exactly what this would be without it, and would then come
+  //   down to which rule sits later in the file.
+  // - `:not(:disabled)` does the same for the disabled rules at the bottom. The question card disables
+  //   its AI half while a draft is unsaved, and a disabled tab wearing a bar is the bug those rules
+  //   exist to prevent.
+  //
+  // Together they put this at (0,4,0), which stays below the hover rule's (0,5,0) — so pointing at the
+  // unselected half still lifts it from this grey to the stronger `--vf-color-text-muted`.
+  &:not(.is-active):not(:disabled) {
+    border-bottom-color: var(--vf-color-border-low-contrast);
+  }
+
+  // Darker grey on hover — but never on the selected tab, and never on the disabled half, which has
+  // nothing to hover towards. `:not(.is-active)` rather than source order, so the active bar below wins
+  // wherever these two rules end up relative to each other.
+  &:not(.is-active):hover:not(:disabled) {
+    border-bottom-color: var(--vf-color-text-muted);
+  }
+
+  // Near-black text, and by default a bar to match — the theme's default text colour rather than a
+  // literal black, because `is-dark` flips it to near-white and a black bar on a dark ground would be a
+  // bar nobody can see. In the light theme this *is* near-black: Vanilla's default text sits just off
+  // it.
+  //
+  // The colour is a caller-settable custom property, read with the near-black as its *fallback* rather
+  // than declared as a default anywhere: a default would be a competing declaration on the same element
+  // at the same specificity as the caller's, and which of the two won would come down to source order.
+  // With a fallback there is nothing to compete with — the dashboard sets the property, the card leaves
+  // it unset. See `.overview__view-toggle`.
+  &.is-active {
+    border-bottom-color: var(--underline-tabs-bar, var(--vf-color-text-default));
+    color: var(--vf-color-text-default);
+  }
+
+  // The gap between an icon and its label, for the tabs that carry one. Vanilla hangs its own icon
+  // margins off `%vf-button-has-icon`, which only `.p-button*` and segmented-control buttons extend, so
+  // a bare button's icon arrives with no margin at all and would sit flush against the first letter.
+  // A margin rather than a space in the markup: these buttons are flex items, and a whitespace-only run
+  // between two flex items is not rendered.
+  [class*="p-icon"] {
+    margin-right: 0.5rem;
+  }
+
+  // Vanilla's own `button:disabled` dimming and `not-allowed` cursor are left alone — the AI half is
+  // disabled while a draft is unsaved and should look it — but its *border* colour is not. Vanilla
+  // restates that for a disabled button at `button:disabled:hover`, `:disabled:active` and
+  // `:disabled[aria-pressed='true']`, all (0,2,1): one type selector more specific than the block
+  // above, and so the one thing here that a two-class selector loses to. Left alone it paints a
+  // high-contrast bar under the disabled half the moment the pointer crosses it — an inactive tab
+  // wearing what reads as the active one's bar. These three are (0,4,0) and settle it. The active
+  // tab's own rule below is (0,3,0) and beats (0,2,1) already, and the active half is never disabled.
+  &:disabled,
+  &:disabled:hover,
+  &:disabled:active {
+    border-bottom-color: transparent;
+  }
+}
+
+// The tabs above the single answer box. No width: an underline tab sizes to its own label, and the
+// pair sits left-aligned with the box's left edge. The bottom margin stands in for the
+// `p-text--small-caps` caption that used to separate the heading from the box here —
+// `.question-card__body-inner`'s row gap does not reach inside this wrapper — and leaves the active
+// bar clear of the box rather than resting on it.
+.question-card__answer-toggle {
+  margin-bottom: 0.75rem;
 }
 
 .question-card__answer {
@@ -1104,6 +1395,12 @@
   background: none;
   border: none;
   padding: 0;
+  // Vanilla gives every bare `button` a bottom margin (`_base_button.scss` extends them all with
+  // `%vf-button-base`), and this one kept it: 20px of empty space hanging below the filename, inside
+  // the row's own flex line. The row centres on the tallest item, so that phantom space was part of
+  // what it centred against and the Remove button beside it sat ~10px low — reading as bottom-aligned
+  // to the uploader line rather than level with the file. It was also padding every row in the list.
+  margin: 0;
   text-align: left;
   font: inherit;
   color: inherit;
@@ -1131,6 +1428,36 @@
 .file-loader__remove-button {
   align-self: center;
   flex-shrink: 0;
+}
+
+// The export stamp in the remove confirmation: whether this project's results were ever taken off
+// the system, which is what decides whether removing it is safe.
+//
+// Coloured through the border tokens rather than a text token, because Vanilla has no
+// `--vf-color-text-positive`; `.due-date-field--overdue` already borrows `--vf-color-border-negative`
+// the same way. Both variants carry an icon, so "never exported" is not distinguished by colour alone.
+.file-loader__export-status {
+  display: flex;
+  // Not `center`: in the dialogs this line is a whole sentence and wraps, and a centred icon would
+  // drift to the middle of the wrapped block instead of sitting on its first line.
+  align-items: flex-start;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+
+  i {
+    flex-shrink: 0;
+    // Nudged onto the cap height of the text beside it, the same 0.125rem the question card's
+    // chevron uses, since `%icon`'s `vertical-align` does nothing to a flex item.
+    margin-top: 0.125rem;
+  }
+
+  &--done {
+    color: var(--vf-color-border-positive);
+  }
+
+  &--none {
+    color: var(--vf-color-border-caution);
+  }
 }
 
 .file-loader__panel {
@@ -1269,9 +1596,68 @@ $card-field-height: 1.75rem;
   margin-bottom: 1.5rem;
 }
 
+// The dashboard section switch and the two actions beside it. `flex-end`, so the toggle's bar and the
+// buttons' bottom edges land on one line: the bar is a `border-bottom`, the buttons are 1.625rem tall,
+// and stretched (the flex default) the buttons would grow to the toggle's height instead.
 .overview__tabs {
   display: flex;
+  align-items: flex-end;
   gap: 0.5rem;
+}
+
+// The All projects / My assignments switch. Brand orange bar, as on the Cards/List switch — one accent
+// for both of this screen's toggles.
+//
+// No grid equalisation of the two halves, unlike `.overview__view-toggle`: that one sits in a control
+// column whose width its tabs have to share, whereas these sit in a free-flowing header row where
+// content width is the right width. Just the extra half-rem of separation from the actions, so the pair
+// reads as one switch rather than as the first two of four buttons.
+//
+// ## Why the tabs are re-metricked here
+//
+// Unlike the other two callers, this switch stands in a row beside two real buttons — New project and
+// Manage Users — so it has to match them rather than only itself. Both of those carry
+// `.file-loader__button`, whose *unscoped* rule is `height: 1.625rem; padding: 0 0.5rem; font-size:
+// 0.875rem`. An underline tab left alone inherits Vanilla's bare-button `font-size: 1rem` and
+// `line-height: 1.5rem` and adds `0.5rem` of bottom padding under the label plus the 0.1875rem bar —
+// about 2.1875rem, in type a size larger. Beside 1.625rem buttons it read as a different control that
+// happened to be adjacent.
+//
+// So: the same box, and the label centred in it by flex rather than sat on top of its own bottom
+// padding. `box-sizing: border-box` is what puts the bar *inside* the 1.625rem instead of under it, and
+// `line-height: 1` is what leaves the label centred on the bar rather than riding high above it.
+//
+// The selector is `.underline-tabs.overview__tab-toggle` — both classes, on the one element `ModeToggle`
+// puts them on — which makes this (0,3,0) against the shared block's (0,2,0). Deliberately specificity
+// rather than source order: the shared block is hundreds of lines up and would otherwise win or lose on
+// where this happens to sit in the file.
+//
+// **Nothing here touches `border-bottom-*`, and it must not.** The bar's colour lives on
+// `.underline-tabs .underline-tabs__tab.is-active`, which is also (0,3,0) — so a `border-bottom` shorthand
+// in this block would reset the colour to `transparent` at equal specificity and, sitting later in the
+// file, would win and take the orange bar with it.
+.underline-tabs.overview__tab-toggle {
+  --underline-tabs-bar: #{vanilla-framework.$color-brand};
+
+  margin-right: 0.5rem;
+
+  // The shared 1.25rem gap is kept. Tightening it to 0.5rem put the two bars close enough, with 0.5rem
+  // of padding inside each, that they read as one long underline with two labels scattered along it
+  // rather than as two tabs — which is the other half of why the labels looked badly placed.
+  .underline-tabs__tab {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 1.625rem;
+    // The shared block's horizontal 0.25rem, kept: the bar runs just past the last letter rather than
+    // standing well clear of it, so the label reads as centred on a bar its own width. Its `0.5rem`
+    // *bottom* padding is what goes — the fixed height and `align-items: center` place the label now,
+    // and that padding is what used to sit it high above the bar with a gap underneath.
+    padding: 0 0.25rem;
+    font-size: 0.875rem;
+    line-height: 1;
+  }
 }
 
 .overview__controls {
@@ -1286,6 +1672,14 @@ $card-field-height: 1.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  // Three of these four are `<label>`s and the fourth is a `<div>`, and Vanilla gives a label
+  // `margin-bottom: $input-margin-bottom`. `.overview__controls` is `align-items: flex-end`, which
+  // aligns *margin* boxes — so that margin held the three selects 10px above the fourth column's
+  // content while the row still looked bottom-aligned. Invisible while the fourth column ended in a
+  // filled box; not invisible at all now that it ends in an underline that has to meet the selects'
+  // own bottom borders. Zeroed rather than mirrored onto the `<div>`, so the row's spacing comes from
+  // the row's own `margin-bottom` and not from a stray form default.
+  margin-bottom: 0;
 
   select {
     width: auto;
@@ -1311,63 +1705,55 @@ $card-field-height: 1.75rem;
   text-align: center;
 }
 
-// The Cards/List toggle. Vanilla's segmented-control pattern happens to leave its buttons with no
-// bottom margin today, but `.overview__controls` is `align-items: flex-end` — one appearing would lift
-// the whole toggle off the baseline the three selects sit on. Pinned rather than trusted.
+// The Cards/List tabs. Underline tabs like the question card's, differing only in the colour of the
+// bar — brand orange rather than near-black, so the dashboard's accent is what marks the chosen view.
+// A build-time colour rather than a themed custom property because `$color-brand-dark` is
+// `$color-brand`: one value already covers `is-dark`.
 //
-// Two thirds of the 22rem it was first widened to, as requested — still wider than the two labels ask
-// for, so there is room for the icons to sit clear of them. The width goes on the control and the
-// buttons take equal shares of it (`flex: 1 1 0`, the list being `display: flex`) rather than each
-// growing by its own content: sized by content, "Cards" is the wider half and the join between them
-// sits off-centre under the caption. Vanilla's own `text-align: center` then centres each label in its
-// half — the buttons are `inline-block`, not flex containers, so `justify-content` would do nothing.
+// The two tabs are the same width as each other, because "Cards" is the wider word and content-sized
+// tabs gave it a visibly longer bar than "List". Equal without a pinned number: the list is sized
+// `max-content` while its children are `flex: 1 1 0`, and a flex container's max-content size with
+// equal grow factors and a zero basis resolves to the widest child's contribution times the number of
+// children — so the pair comes out at twice the wider label and each half takes one of them. A literal
+// width would have to be re-guessed if either label changed, and Vanilla ellipses an overflowing button
+// silently (`overflow: hidden` with `text-overflow: ellipsis`), so guessing low fails quietly.
+//
+// `margin-left: auto` then keeps the pair against the column's right edge — `justify-content` cannot,
+// because a `max-content` list has no free space left to justify within. `.overview__control--view` is
+// itself pushed hard right by its own auto margin, so that edge is the row's own.
+//
+// Deliberately no `max-width: 100%` here. It reads like a safe guard and is the opposite: the column's
+// width comes from its widest child, a percentage max-width is ignored while that is being measured and
+// then applied afterwards, so the list ended up clamped to the width of the count caption above it —
+// narrower than the two labels need. Each half came out at 64.8px for a label wanting ~88px and the
+// labels stacked under their icons, two lines tall. The tabs are ~11rem together; there is no screen
+// this needs protecting from, and the row wraps this column onto its own line before it gets close.
+//
+// Alignment with the three selects is the reason this needs no vertical rule of its own, and the reason
+// not to give it one. `.overview__controls` is `align-items: flex-end` and `.overview__control select`
+// is `margin-bottom: 0`, so a select's bottom border sits exactly on the row's bottom edge. The tab's
+// bar is a `border-bottom`, so it sits exactly on the tab's bottom edge — and the two edges are the
+// same line. What would break it is a bottom margin on either side: Vanilla gives a bare `button`
+// `margin-bottom: $input-margin-bottom`, which `.underline-tabs__tab` pins to 0 (it has to — the same
+// trap cost the segmented control a `margin-bottom: 0` of its own), and this wrapper deliberately adds
+// none where `.question-card__answer-toggle` adds 0.75rem.
 .overview__view-toggle {
-  width: 14.75rem;
-  max-width: 100%;
-}
+  --underline-tabs-bar: #{vanilla-framework.$color-brand};
 
-// Two classes deep so this beats `.p-button--brand`/`--base` on the same element (0,1,0).
-.overview__view-toggle .p-segmented-control__button {
-  flex: 1 1 0;
-  margin-bottom: 0;
-
-  // Orange on both halves, so the unselected one has a visible outline. `.p-button--base` sets every
-  // one of its border colours to `transparent` — that is why only the pressed button had an edge — and
-  // it sets them per state, including `[aria-pressed='true']` (0,2,0), which the buttons here carry. So
-  // the states are restated rather than left to the one declaration above, which would only tie with
-  // those on specificity and win on source order alone.
-  //
-  // The exact fill of the selected half, not merely an orange: `p-button--brand` plus the button's own
-  // `aria-pressed="true"` resolves to Vanilla's *active* brand, so the value is computed here the same
-  // way `%p-button--brand-light` computes it rather than pinned to a literal that would drift if the
-  // theme moved. `$color-brand-dark` is `$color-brand`, so one value covers `is-dark` too — which is why
-  // this can be a build-time colour where `--vf-color-border-caution` had to be a themed custom
-  // property.
-  &,
-  &:hover,
-  &:active,
-  &[aria-pressed="true"] {
-    // `-namespace.$var` does not parse — Sass reads the minus as part of the namespace — hence `* -1`.
-    border-color: color.adjust(
-      vanilla-framework.$color-brand,
-      $lightness: vanilla-framework.$active-background-opacity-percentage * -1
-    );
-  }
-
-  // The gap between an icon and its label. Vanilla's `%vf-button-has-icon` gives an icon $sph--small of
-  // margin on both sides, then cancels it again on `:first-child` and `:last-child` — and the icon here
-  // is the button's *only* element child, so it is both, and a space in the markup disappeared into that
-  // negative right margin. Pseudo-classes bring these to 0,4,0, over Vanilla's own 0,3,0. The left one
-  // goes to zero rather than staying negative because the pair is centred in a button wider than it:
-  // a negative outer margin shifts the visible group off the centre the browser measured.
-  [class*="p-icon"] {
-    &:first-child {
-      margin-left: 0;
-    }
-
-    &:last-child {
-      margin-right: 0.5rem;
-    }
+  // A grid rather than the shared flex row, because flex cannot do equal-and-content-sized here. With
+  // `white-space: nowrap` each tab's automatic minimum size is its whole label, so `flex: 1 1 0` has no
+  // free space left to even out — the halves just sit at their own content widths — and a `max-content`
+  // flex container resolves to the *sum* of them, not twice the wider. Grid's `1fr` is defined to do
+  // exactly what is wanted: equal tracks, each at least the widest item's max-content.
+  .underline-tabs__list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    // Sized to those equalised tracks. Left as a block it would be as wide as the column, the tracks
+    // would still floor at the wider label's width, and the pair would overflow to the right of the
+    // column's edge instead of widening the column.
+    width: max-content;
+    margin-left: auto;
   }
 }
 
@@ -1908,11 +2294,17 @@ $card-field-height: 1.75rem;
     flex-shrink: 0;
   }
 
-  // "Assign" centred in the box. Two defaults have to be undone for it: the label is `flex: 1 1 auto`,
-  // so it would absorb all the free space and leave `justify-content` nothing to centre, and the chevron
-  // is pushed right by `margin-left: auto`, which would hold the pair apart at opposite ends. With both
-  // released, the word and its chevron centre together as one group.
+  // "Assign" on the box's centre line, chevron against the right edge — the placement "Set date" has in
+  // the Due button directly below it, which is the same size and centres its own content.
+  //
+  // The chevron comes out of the flow for that. Left in it, it is one of two flex items and centring the
+  // row centres the *pair*, which sets the word half a chevron left of centre: on its own that looks
+  // deliberate, but stacked above a genuinely centred "Set date" it reads as a misalignment. Positioned
+  // instead, the label is the only thing left in the row and lands on the true middle. The label still
+  // has to give up its `flex: 1 1 auto`, or it would absorb the free space and leave `justify-content`
+  // nothing to centre.
   .team-member-select__trigger.is-empty {
+    position: relative;
     justify-content: center;
 
     .team-member-select__trigger-label {
@@ -1920,7 +2312,16 @@ $card-field-height: 1.75rem;
     }
 
     i {
-      margin-left: 0.25rem;
+      position: absolute;
+      // The trigger's own horizontal padding, so the chevron stands off the border by exactly as much
+      // as the label would.
+      right: 0.5rem;
+      // Not `top: 50%` with a `translateY(-50%)`: `p-icon--chevron-up` *is* `--chevron-down` under a
+      // `transform: rotate(180deg)`, and a transform declared here would out-specify that and leave the
+      // open state pointing the wrong way. `%icon` fixes the height at 1rem, so half of it centres the
+      // icon with no transform involved.
+      top: calc(50% - 0.5rem);
+      margin: 0;
     }
   }
 }
@@ -2050,17 +2451,39 @@ $card-field-height: 1.75rem;
 
 /* ── Completed & exported list ── */
 
+// Column widths in one place, read by the row template below, on the `.project-list` pattern. Each is
+// sized for its widest realistic content rather than for the average, because the point of a fixed
+// track is that nothing in it is ever clipped: `--date` holds a full `formatTimestamp` (`Sep 29, 2026,
+// 02:32 PM` in the longest common locale), `--questions` holds a four-digit count and its label, and
+// `--status` holds "Pending" plus the select's 2rem of chevron room.
 .completed-list {
+  --completed-col-name: minmax(16rem, 1fr);
+  --completed-col-questions: 7.5rem;
+  --completed-col-by: 9rem;
+  --completed-col-date: 11rem;
+  --completed-col-status: 8.5rem;
+  --completed-col-action: 10rem;
+
   margin-top: 2.5rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--vf-color-border-low-contrast);
+}
+
+.completed-list__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
 }
 
 .completed-list__heading {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  // The row above owns the spacing now, so the heading must not add its own on top of it.
+  margin-bottom: 0;
 }
 
 .completed-list__count {
@@ -2069,41 +2492,203 @@ $card-field-height: 1.75rem;
   border: 1px solid var(--vf-color-border-low-contrast);
 }
 
-.completed-row {
+// Label above control, as the dashboard's other filters are drawn (`.overview__control`).
+.completed-list__filter {
   display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  // Vanilla gives a `<label>` a bottom margin, which would push this below the heading's baseline.
+  margin-bottom: 0;
+
+  select {
+    width: auto;
+    min-width: 13rem;
+    margin-bottom: 0;
+  }
+}
+
+// A grid, not a flex row. Flex sized each cell from its own content, so the questions, exporter and
+// date columns started at a different x on every line and the widest value in each decided nothing —
+// which is what left long dates and names clipped inside an 8rem box. Fixed tracks give the section
+// one set of columns down the page, and `--completed-col-name` is the **only** elastic one: a second
+// `1fr` would divide the slack between two tracks and the alignment would go with it. Same rule, and
+// the same reason, as `.project-list__row`.
+//
+// The template lives on the row rather than the `<ul>` because each row is a `.p-list__item` with its
+// own divider, and `display: contents` on the row would discard it.
+.completed-row {
+  display: grid;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;
+  grid-template-columns:
+    auto
+    var(--completed-col-name)
+    var(--completed-col-questions)
+    var(--completed-col-date)
+    var(--completed-col-status)
+    var(--completed-col-action);
   min-width: 0;
+}
+
+// The exporter's name is the first column to go, and only where the row is wide enough to afford it
+// does it appear — so the template gains a track and the cell stops being hidden together. Doing one
+// without the other either leaves an empty column or overflows the row.
+@media (min-width: 85rem) {
+  .completed-row {
+    grid-template-columns:
+      auto
+      var(--completed-col-name)
+      var(--completed-col-questions)
+      var(--completed-col-by)
+      var(--completed-col-date)
+      var(--completed-col-status)
+      var(--completed-col-action);
+  }
+}
+
+@media (max-width: 84.999rem) {
+  .completed-row__by {
+    display: none;
+  }
 }
 
 .completed-row__icon {
   flex-shrink: 0;
 }
 
+// `min-width: 0` because a grid item's automatic minimum size is its content, which would otherwise
+// push the name track past the width the template gives it and drag the whole right-hand group with it.
+//
+// `max-width` caps the *item*, not its track. The track stays `1fr`, which is what keeps the status and
+// action columns flush against the row's right edge — capping the track instead would leave trailing
+// dead space there and pull the whole right-hand group inwards. So on a wide screen a long name stops
+// growing at the cap and the surplus simply sits between it and the questions column.
 .completed-row__name {
-  flex: 1 1 auto;
   min-width: 0;
+  max-width: var(--project-name-max);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-// Fixed columns so the rows read as a table rather than as ragged text, without the markup of one.
-.completed-row__meta {
-  flex-shrink: 0;
-  width: 8rem;
+// `nowrap` with no `text-overflow`: these tracks are sized to hold their content whole, so a value that
+// does not fit is a track that needs widening, not something to hide behind an ellipsis. The exporter's
+// name is the one exception — it is a person's display name and can be any length — and it carries a
+// `title` in the markup for the rest.
+.completed-row__cell {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.completed-row__by {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
 
-  @media (max-width: 900px) {
-    display: none;
-  }
+// The question count, padded to three digits so "questions" starts at the same x down the column —
+// `123 questions` and ` 23 questions` line up rather than the word sliding left with the shorter number.
+// The same treatment, and the same reasoning, as `.project-list__badge-count`.
+//
+// `ch` is the advance measure of `0`, so `3ch` is exactly three digits — and tabular figures are what
+// make that true of the other nine as well, `1` included. `min-width` rather than `width`: a fourth
+// digit widens the slot by one more digit instead of spilling out of a fixed box into the label. The
+// `--questions` track is sized with room for that.
+//
+// The gap to the label is this margin, not a space in the markup. A literal space between two JSX
+// expressions on separate lines is not reliably emitted, and making the cell a flex container to lay the
+// two out would drop a whitespace-only run between them outright — so the gap belongs on the element
+// either way.
+//
+// `inline-block` because `min-width` and `text-align` do nothing on an inline box.
+.completed-row__count {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 0.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .completed-row__action {
-  flex-shrink: 0;
-  margin-left: auto;
+  // No `margin-left: auto`: the action's track is the last one and already sits at the row's right
+  // edge. An auto margin inside a grid item would shove it within its own cell instead.
+  justify-self: stretch;
+}
+
+// The deal-outcome dropdown.
+//
+// Typed as `select.completed-row__status` (0,1,1) rather than on the class alone, because every metric
+// here is one Vanilla already sets on a bare `select` at (0,1,0) — and the background is restated at
+// `select:hover` (0,1,1), which a single class would lose to the moment the pointer crossed it. The
+// hover rule below is (0,1,2) and settles it.
+//
+// Only `background-color` is touched, never `background`: the chevron is a `background-image` on the
+// same element, and the shorthand would take it with it.
+select.completed-row__status {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 1.75rem;
+  // Vertical padding zeroed — the fixed height places the label now. 2rem on the right is the chevron's
+  // room, as Vanilla's own `select` reserves.
+  padding: 0 2rem 0 0.5rem;
+  margin-bottom: 0;
+  border: 1px solid var(--completed-status-border, var(--vf-color-border-high-contrast));
+  border-radius: 0;
+  background-color: var(--completed-status-bg, var(--vf-color-background-inputs));
+  background-position: right 0.375rem center;
+  font-size: 0.875rem;
+  line-height: 1;
+
+  &:hover {
+    background-color: var(--completed-status-bg, var(--vf-color-background-hover));
+  }
+
+  // The three tints are the app's own status colours, so a colour means the same thing here as it does
+  // on a question card: green signed off, red gone wrong, amber waiting on somebody. Blue
+  // (`information`) is deliberately not among them — it reads as "in progress", which a finished
+  // project's deal is not.
+  &--positive {
+    --completed-status-bg: var(--vf-color-background-positive-default);
+    --completed-status-border: var(--vf-color-border-positive);
+  }
+
+  &--negative {
+    --completed-status-bg: var(--vf-color-background-negative-default);
+    --completed-status-border: var(--vf-color-border-negative);
+  }
+
+  &--caution {
+    --completed-status-bg: var(--vf-color-background-caution-default);
+    --completed-status-border: var(--vf-color-border-caution);
+  }
+}
+
+// Below this the row stops being a grid and wraps, the same surrender `.project-list__row` makes:
+// aligned columns are the first thing worth losing when there is no width to align them in. The name
+// takes a whole line and the rest follows under it.
+@media (max-width: 60rem) {
+  .completed-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+  }
+
+  // A whole line to itself here, so the cap is lifted: it exists to stop the name crowding what shares
+  // its line, and nothing does any more. Left on, it would hold the name to 24rem of a wider row and
+  // ellipse a title that had room to be read in full.
+  .completed-row__name {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  select.completed-row__status {
+    width: auto;
+    min-width: 8.5rem;
+  }
+
+  .completed-row__action {
+    margin-left: auto;
+  }
 }
 
 /* ── My assignments ── */
@@ -2128,11 +2713,25 @@ $card-field-height: 1.75rem;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
+// Capped and truncating like the other two. This one had no limit of any kind: it sits in a wrapping
+// flex row beside the "Project owner" badge, so a long name pushed that badge off onto its own line and
+// stretched the row.
+//
+// The ellipsis goes straight on the button, unlike `.project-list__filename-text`, which needs a child:
+// that button is a flex container (it also holds a spinner) and `text-overflow` applies to block
+// containers only, whereas this one is Vanilla's default `inline-block` and so is a block container
+// itself. `overflow: hidden` doubles as the fix for a flex item's automatic minimum size, which is
+// otherwise its full content width and would refuse to shrink at all.
 .my-assignments__link {
   font-weight: 550;
   text-align: left;
+  max-width: var(--project-name-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .my-assignments__detail {

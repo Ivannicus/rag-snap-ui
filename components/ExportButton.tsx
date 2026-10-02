@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { markExported, removeSavedFile } from "@/lib/savedFiles";
-import { archiveProject } from "@/lib/archive";
-import { buildCsv, csvFilenameFor, downloadCsv } from "@/lib/csv";
-import { auth } from "@/lib/firebase";
+import { removeSavedFile } from "@/lib/savedFiles";
+import { csvFilenameFor } from "@/lib/csv";
+import { exportProject } from "@/lib/export";
 import type { ParsedQAFile } from "@/lib/types";
 
 interface Props {
@@ -59,56 +58,34 @@ export default function ExportButton({
   const downloadName = csvFilenameFor(sourceFilename);
 
   /**
-   * Build the CSV, hand it to the browser, and record the export.
+   * Download the CSV and record the export, through the shared `exportProject`.
    *
-   * Returns whether the download was successfully *initiated* — see `downloadCsv` for why that is the
-   * strongest available signal. It is what gates the removal step, so the recording below happens only
-   * once the download has actually started.
+   * Returns whether the download was *initiated* — see `downloadCsv` for why that is the strongest
+   * available signal. It is what gates the removal step, so nothing is removed until the file is on
+   * its way to disk.
    *
-   * Two things are recorded, and both matter on the dashboard. The archive entry is what lets a
-   * completed project still be listed, and its CSV rebuilt, after the `savedFiles` record is gone; the
-   * stamp on the `savedFiles` record is what distinguishes a project that was exported and kept from
-   * one nobody has finished. Both run on both export paths, because "these results were taken away" is
-   * the same event whether or not the project is also removed afterwards.
-   *
-   * Neither is awaited and neither failure blocks the export. The CSV is already on its way to the
-   * reader's disk by this point, and refusing to complete an export that has visibly happened because
-   * a bookkeeping write failed would be worse than a missing archive row. A failed archive write is
-   * surfaced, though, because it is the difference between being able to re-download this project later
-   * and not.
+   * The archive write is the one piece of the bookkeeping worth surfacing: it is the difference
+   * between being able to re-download this project from the completed list later and not.
    */
   function runExport(): boolean {
-    const csv = buildCsv(data, { editedAnswers, ratings, contextUrls });
-    if (!downloadCsv(csv, downloadName)) return false;
+    const { downloaded, archived } = exportProject({
+      data,
+      editedAnswers,
+      ratings,
+      contextUrls,
+      sourceFilename,
+      docId,
+    });
+    if (!downloaded) return false;
 
-    if (docId) {
-      const exportedBy =
-        auth.currentUser?.displayName ?? auth.currentUser?.email ?? "Unknown";
-      const exportedByEmail = auth.currentUser?.email ?? "";
-
-      void archiveProject({
-        // The *source* name, because that is what the completed list feeds back through
-        // `csvFilenameFor` to rebuild this CSV. Storing the download name instead put a name that had
-        // already been through it into it a second time, so a re-download came out as
-        // `results-export.csv-export.csv`. The fallback mirrors `csvFilenameFor`'s own `results` stem,
-        // so a project with no source name still re-downloads under the name it was exported as.
-        filename: sourceFilename ?? "results.json",
-        exportedBy,
-        exportedByEmail,
-        data,
-        editedAnswers,
-        sourceSessionId: docId,
-      })
-        .then(() => onExported())
-        .catch(() =>
-          onError(
-            "Export archived incompletely",
-            "The CSV downloaded, but this project could not be added to the completed list. It will not be possible to re-download the results from here later, so keep the file you just saved."
-          )
-        );
-
-      void markExported(docId, exportedBy, exportedByEmail, Date.now()).catch(() => {});
-    }
+    archived
+      ?.then(() => onExported())
+      .catch(() =>
+        onError(
+          "Export archived incompletely",
+          "The CSV downloaded, but this project could not be added to the completed list. It will not be possible to re-download the results from here later, so keep the file you just saved."
+        )
+      );
 
     return true;
   }

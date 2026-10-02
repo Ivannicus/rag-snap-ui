@@ -244,20 +244,62 @@ export async function listProjectMetas(): Promise<ProjectMeta[]> {
  * two. Returning `undefined` from the handler aborts, which is how "leave it alone" is expressed;
  * `ensureSession` uses the same shape to seed a room without disturbing an existing one.
  *
+ * ## Why the read and the listener are here
+ *
+ * `runTransaction` runs its handler *immediately*, against whatever the client has cached, and an
+ * abort on that first run ends the transaction there — no round trip, and the promise resolves
+ * rather than rejecting. On its own, then, the guard above reads an empty cache as "removed": the
+ * handler is handed `null`, aborts, and the caller is told the write succeeded.
+ *
+ * Nothing here was cached. The SDK caches a path only while a query on it is active ("Only active
+ * queries are cached. There is no persisted cache" — `repoGetValue`), and a bare `get()` drops its
+ * registration as it resolves, so `listProjectMetas` leaves nothing behind. The one live listener on
+ * `savedFiles` is `subscribeToSavedFiles`, in the `FileLoader` inside `Header` — and `Header` is not
+ * rendered on the Overview dashboard, the one screen that edits a due date. So every due-date write
+ * from the dashboard aborted, silently, and the date survived only until the next `listProjectMetas`.
+ *
+ * Hence both lines below, each doing a different job:
+ *
+ * - `onValue` keeps the path cached for as long as the read and the write take, so the handler's
+ *   first run sees the record. Detaching evicts what it cached, so it is held to the end.
+ * - `get()` is the authoritative read. Waiting on the listener's first snapshot instead is not
+ *   enough: a fresh listener can raise an initial `null` before the server's value arrives, and
+ *   acting on that is the same bug again.
+ *
+ * With both in place a `null` reaching the handler means the record really is gone, which is what
+ * the guard was always meant to test.
+ *
  * A field set to `undefined` is deleted rather than written. RTDB rejects an `undefined` value
  * outright, so a spread carrying one would fail the whole write — which is what clearing a due date
  * would otherwise do.
  */
 function updateExistingDoc(fileId: string, fields: Partial<StoredDoc>): Promise<void> {
-  return runTransaction(ref(db, `savedFiles/${fileId}`), (current: StoredDoc | null) => {
-    if (current === null) return undefined;
-    const next = { ...current };
-    for (const [key, value] of Object.entries(fields)) {
-      if (value === undefined) delete next[key as keyof StoredDoc];
-      else Object.assign(next, { [key]: value });
-    }
-    return next;
-  }).then(() => undefined);
+  const node = ref(db, `savedFiles/${fileId}`);
+
+  // The no-op cancel callback is not optional: without it a rules rejection here is an uncaught
+  // throw. The rejection that matters reaches the caller through `get` below.
+  const detach = onValue(
+    node,
+    () => {},
+    () => {}
+  );
+
+  return get(node)
+    .then((snap) => {
+      // The project was removed. Writing anything now is what creates the ghost record.
+      if (!snap.exists()) return;
+
+      return runTransaction(node, (current: StoredDoc | null) => {
+        if (current === null) return undefined;
+        const next = { ...current };
+        for (const [key, value] of Object.entries(fields)) {
+          if (value === undefined) delete next[key as keyof StoredDoc];
+          else Object.assign(next, { [key]: value });
+        }
+        return next;
+      }).then(() => undefined);
+    })
+    .finally(() => detach());
 }
 
 /**
@@ -284,6 +326,36 @@ function migrateInlineData(
     writes[`savedFiles/${fileId}/${key}`] = value;
   }
   return update(ref(db), writes);
+}
+
+/**
+ * Outcome of a rename.
+ *
+ * Only the name clash is reported back, and for the same reason `saveFile` separates it from
+ * `duplicate`: the content is not in question here — this record keeps the document it already had —
+ * so the only thing that can stop a rename is a *different* project already answering to the name.
+ * A record that has since been removed is not a failure: `updateExistingDoc` aborts against it rather
+ * than resurrecting it as a ghost holding nothing but a filename.
+ */
+export type RenameFileResult = { ok: true } | { ok: false; reason: 'filenameConflict'; existingId: string };
+
+/**
+ * Rename a project that is already in the bank.
+ *
+ * The project setup modal writes here on the snap-handoff path, where the record was saved on accept —
+ * so the name can no longer be chosen by passing it to `saveFile`, as the picked-file path does.
+ *
+ * The uniqueness check `saveFile` makes on the way in has to be repeated, or renaming would be the way
+ * around it: two records sharing a filename is exactly the state that check exists to prevent, and it
+ * is what `filenameConflict` is reported from later. Self is excluded, so renaming a project to the
+ * name it already has is a no-op rather than a clash with itself.
+ */
+export async function renameSavedFile(fileId: string, filename: string): Promise<RenameFileResult> {
+  const clash = (await listDocs()).find((doc) => doc.id !== fileId && doc.filename === filename);
+  if (clash) return { ok: false, reason: 'filenameConflict', existingId: clash.id };
+
+  await updateExistingDoc(fileId, { filename });
+  return { ok: true };
 }
 
 /** Set or clear a project's due date. Pass null to clear. */
@@ -334,6 +406,11 @@ export function subscribeToSavedFiles(
             uploadedByName: v.uploadedByName,
             uploadedByEmail: v.uploadedByEmail,
             uploadedAt: v.uploadedAt,
+            // Three more short fields, no extra read: the record already carries the export stamp,
+            // and the loader shows it beside Remove.
+            exportedAt: v.exportedAt ?? null,
+            exportedBy: v.exportedBy ?? null,
+            exportedByEmail: v.exportedByEmail ?? null,
           }))
           .sort((a, b) => b.uploadedAt - a.uploadedAt)
       : [];
@@ -372,6 +449,9 @@ export async function getSavedFile(id: string): Promise<SavedFile | null> {
     uploadedByName: stored.uploadedByName,
     uploadedByEmail: stored.uploadedByEmail,
     uploadedAt: stored.uploadedAt,
+    exportedAt: stored.exportedAt ?? null,
+    exportedBy: stored.exportedBy ?? null,
+    exportedByEmail: stored.exportedByEmail ?? null,
   };
 }
 
@@ -403,6 +483,13 @@ interface SaveFileInput {
   data: ParsedQAFile;
   uploadedByName: string;
   uploadedByEmail: string;
+  /**
+   * Optional due date, ISO at UTC midnight (see `lib/dates.ts`). Written in the same atomic create
+   * below rather than patched in afterwards with `setDueDate`: that goes through `updateExistingDoc`,
+   * whose `get` + `runTransaction` ghost guard is there for editing a record somebody else may have
+   * removed, which cannot be true of one being minted in the same breath.
+   */
+  dueDate?: string | null;
 }
 
 /**
@@ -426,6 +513,7 @@ export async function saveFile({
   data,
   uploadedByName,
   uploadedByEmail,
+  dueDate,
 }: SaveFileInput): Promise<SaveFileResult> {
   const contentHash = await hashDoc(data);
   const existing = await listDocs();
@@ -458,6 +546,10 @@ export async function saveFile({
       // Denormalized now, while the data is in hand, so the dashboard never has to load it back.
       itemCount: data.items.length,
       aiUnansweredIds: aiUnansweredIdsOf(data),
+      // Spread rather than written unconditionally: RTDB rejects an explicit `undefined`, and a
+      // `null` would store the key as a tombstone where every other unscheduled project simply has
+      // no `dueDate` child at all.
+      ...(dueDate ? { dueDate } : {}),
     },
     [`${DATA_ROOT}/${id}`]: data,
   });

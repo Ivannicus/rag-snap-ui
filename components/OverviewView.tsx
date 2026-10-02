@@ -7,8 +7,11 @@ import ProjectSummaryStrip from "./ProjectSummaryStrip";
 import CompletedProjectsList from "./CompletedProjectsList";
 import MyAssignments from "./MyAssignments";
 import TeamMemberMultiSelect from "./TeamMemberMultiSelect";
+import ModeToggle from "./ModeToggle";
+import ManageUsersPanel from "./ManageUsersPanel";
+import type { ModeToggleOption } from "./ModeToggle";
 import { listProjectMetas, setDueDate } from "@/lib/savedFiles";
-import { listArchivedProjects } from "@/lib/archive";
+import { listArchivedProjects, setDealStatus } from "@/lib/archive";
 import { setProjectAssignees } from "@/lib/session";
 import {
   EMPTY_OVERLAYS,
@@ -19,12 +22,14 @@ import {
   sameOverlays,
   subscribeToProjectOverlays,
 } from "@/lib/projects";
+import { findMemberByEmail } from "@/lib/teamBank";
 import type {
   ArchivedProjectMeta,
   ProjectMeta,
   ProjectOverlays,
   ProjectSummary,
   TeamMember,
+  DealStatus,
 } from "@/lib/types";
 
 type SortKey = "dueDate" | "progress" | "filename" | "uploadedAt";
@@ -35,11 +40,40 @@ type ViewMode = "cards" | "list";
 
 const VIEW_MODE_KEY = "overviewViewMode";
 
+/** Module-level so the array identity is stable across renders. */
+const VIEW_MODE_OPTIONS: readonly ModeToggleOption<ViewMode>[] = [
+  { value: "cards", label: "Cards", icon: "p-icon--switcher-dashboard" },
+  { value: "list", label: "List", icon: "p-icon--menu" },
+];
+
+/**
+ * The two halves of the dashboard, as the same underline-tab control the Cards/List switch uses.
+ *
+ * They were a pair of filled `p-button--brand` / `--base` buttons, which read as two actions sitting
+ * next to two more (New project, Manage Users) rather than as one two-state switch. Same component
+ * means the same `aria-pressed` pair and the same bar, so the two switches on this screen cannot drift.
+ */
+//
+// Labels alone, deliberately — like the question card's AI/Edited tabs and unlike Cards/List. An icon is
+// a flex item beside the label, so `justify-content: center` centres the *pair* and leaves the label
+// itself sitting right of its own underline's midpoint. With a bar this short that is plainly visible.
+const TAB_OPTIONS: readonly ModeToggleOption<Tab>[] = [
+  { value: "projects", label: "All projects" },
+  { value: "mine", label: "My assignments" },
+];
+
 interface Props {
   teamMembers: TeamMember[];
   userEmail?: string;
   /** Open a project in the collaborative inspector. Resolves once its document has loaded. */
   onOpenProject: (projectId: string) => void;
+  /**
+   * Start creating a project: opens the file picker, then the configuration modal.
+   *
+   * Owned by `AppShell` rather than here because the Projects dropdown in the Collab UI's header
+   * starts the same flow, and the shell is the only parent both views have.
+   */
+  onNewProject: () => void;
   /** The project currently being fetched, so its card can show progress. */
   openingProjectId: string | null;
   onError: (title: string, message: string) => void;
@@ -55,6 +89,7 @@ export default function OverviewView({
   teamMembers,
   userEmail,
   onOpenProject,
+  onNewProject,
   openingProjectId,
   onError,
   refreshKey,
@@ -177,12 +212,35 @@ export default function OverviewView({
 
   const liveProjectIds = useMemo(() => new Set(projectIds), [projectIds]);
 
-  const me = useMemo(
-    () =>
-      userEmail
-        ? teamMembers.find((m) => m.email.toLowerCase() === userEmail.toLowerCase()) ?? null
-        : null,
-    [teamMembers, userEmail]
+  // Through the shared resolver in `lib/teamBank.ts`, which `AppShell` also uses, so "which member am
+  // I" has one answer rather than one per view. See `findMemberByEmail` for what it is careful about.
+  const me = useMemo(() => findMemberByEmail(teamMembers, userEmail), [teamMembers, userEmail]);
+
+  /**
+   * Whether "who am I" is still an open question, as opposed to answered with "nobody".
+   *
+   * `me` is null in two completely different situations and `MyAssignments` has to say different
+   * things about them: the bank snapshot has not arrived yet (every dashboard open, for a moment), or
+   * it has and this user genuinely is not in it. An empty bank means the former — `ensureTeamMember`
+   * writes an entry on first sign-in, so a signed-in reader is always in a loaded bank.
+   */
+  const identityPending = !me && !!userEmail && teamMembers.length === 0;
+
+  /**
+   * Whether any project's assignment overlays are still outstanding.
+   *
+   * Same distinction as above, one level down: before its overlays land a project falls back to
+   * `EMPTY_OVERLAYS`, which is indistinguishable from a project nobody is assigned to. The grid does
+   * not care — it draws an empty wheel either way and fills in — but "nothing is assigned to you" is a
+   * statement, and making it before the data is in is just wrong.
+   *
+   * An id present in `overlaysById` means that project's five listeners have all reported at least
+   * once; `subscribeToProjectOverlays` guarantees that one call even when nothing differs from empty,
+   * which is what makes this test meaningful for an unstaffed project.
+   */
+  const overlaysPending = useMemo(
+    () => projectIds.some((id) => !(id in overlaysById)),
+    [projectIds, overlaysById]
   );
 
   // Only members who actually own something appear in the filter, so the dropdown describes this
@@ -316,6 +374,38 @@ export default function OverviewView({
    * `value`, which is also what re-enables its own "Clear all", and the selection is cleared once
    * here — after the writes, when the bar has done its job.
    */
+  /**
+   * Report a completed project's deal outcome.
+   *
+   * Patched locally first so the dropdown answers the click, then written. **Reverted** on failure,
+   * unlike the session writes in `AppShell` which leave the change on screen behind a toast: those are
+   * edits the reader can see for themselves in the document, whereas this is a single word whose only
+   * evidence is the control itself. Left showing "Won" after a failed write, it would be indistinguishable
+   * from a saved "Won".
+   *
+   * Takes `archived` as a dependency to read the value it may have to put back. Nothing in this tree is
+   * memoized, so a stable identity would buy nothing here.
+   */
+  const handleChangeDealStatus = useCallback(
+    (archiveId: string, status: DealStatus) => {
+      const previous = archived.find((entry) => entry.id === archiveId)?.dealStatus ?? "pending";
+      const patch = (next: DealStatus) =>
+        setArchived((prev) =>
+          prev.map((entry) => (entry.id === archiveId ? { ...entry, dealStatus: next } : entry))
+        );
+
+      patch(status);
+      setDealStatus(archiveId, status).catch(() => {
+        patch(previous);
+        onError(
+          "Status not saved",
+          "The deal status could not be saved for the team, so it has been put back. Check your connection, then set it again."
+        );
+      });
+    },
+    [archived, onError]
+  );
+
   const handleBulkAssign = useCallback(() => {
     if (bulkOwnerIds.length === 0 || effectiveSelection.length === 0) return;
     for (const projectId of effectiveSelection) {
@@ -352,26 +442,33 @@ export default function OverviewView({
           </p>
         </div>
         <div className="overview__tabs">
+          {/* The same underline tabs as the Cards/List switch below, brand orange bar and all — see
+              `ModeToggle`. These two were filled buttons, which put them in the same visual register as
+              the two *actions* beside them and left the pair reading as four buttons in a row rather
+              than as one switch and two actions. */}
+          <ModeToggle
+            className="overview__tab-toggle"
+            ariaLabel="Dashboard section"
+            value={tab}
+            onChange={setTab}
+            options={TAB_OPTIONS}
+          />
+          {/* An action, not a third tab, so deliberately no `aria-pressed`: the two above are a
+              mutually-exclusive pair, and a third one permanently unpressed is announced as a tab
+              nobody can select. `file-loader__button` is what matches the 1.625rem height and square
+              corners of Manage Users beside it. `is-light` on the icon because `--positive` is a dark
+              green fill. */}
           <button
             type="button"
-            onClick={() => setTab("projects")}
-            aria-pressed={tab === "projects"}
-            className={`is-dense u-no-margin--bottom file-loader__button ${
-              tab === "projects" ? "p-button--brand" : "p-button--base"
-            }`}
+            onClick={onNewProject}
+            className="p-button--positive is-dense u-no-margin--bottom file-loader__button"
           >
-            All projects
+            <i className="p-icon--plus is-light" aria-hidden></i> New project
           </button>
-          <button
-            type="button"
-            onClick={() => setTab("mine")}
-            aria-pressed={tab === "mine"}
-            className={`is-dense u-no-margin--bottom file-loader__button ${
-              tab === "mine" ? "p-button--brand" : "p-button--base"
-            }`}
-          >
-            My assignments
-          </button>
+          {/* The global user bank — who is and is not in the tool at all. Moved here from the Collab
+              UI header, where it was both the wrong scope for that view and unreachable from this
+              tab. Per-project team is `ProjectTeamPanel`, over in the header. */}
+          <ManageUsersPanel teamMembers={teamMembers} />
         </div>
       </div>
 
@@ -386,7 +483,13 @@ export default function OverviewView({
       <ProjectSummaryStrip projects={projects} archivedCount={archived.length} />
 
       {tab === "mine" ? (
-        <MyAssignments me={me} projects={projects} onOpenProject={onOpenProject} />
+        <MyAssignments
+          me={me}
+          identityPending={identityPending}
+          overlaysPending={overlaysPending}
+          projects={projects}
+          onOpenProject={onOpenProject}
+        />
       ) : (
         <>
           <div className="overview__controls">
@@ -442,39 +545,17 @@ export default function OverviewView({
               <span className="u-text--muted p-text--small overview__count">
                 Showing {visibleProjects.length} of {projects.length}
               </span>
-              {/* Vanilla's segmented control: square-cornered and joined by design, which is what a
-                  two-way view choice should look like next to three selects. It ships no active-state
-                  styling of its own, so the pressed button carries `p-button--brand` — the same
-                  brand/base pairing the tabs above use. Its own `border-radius: 0` is set at
-                  specificity 0,2,0 and so survives the button class. */}
-              <div className="p-segmented-control is-dense overview__view-toggle">
-                <div className="p-segmented-control__list" role="group" aria-label="Project view">
-                  {([
-                    { mode: "cards", label: "Cards", icon: "p-icon--switcher-dashboard" },
-                    { mode: "list", label: "List", icon: "p-icon--menu" },
-                  ] as const).map(({ mode, label, icon }) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => changeViewMode(mode)}
-                      aria-pressed={viewMode === mode}
-                      className={`p-segmented-control__button ${
-                        viewMode === mode ? "p-button--brand" : "p-button--base"
-                      }`}
-                    >
-                      {/* No space between the two: the gap is a margin on the icon, because Vanilla
-                          gives an icon that is a button's only element child a *negative* right margin
-                          (`:last-child` in `%vf-button-has-icon`) which ate a space in the markup and
-                          pulled the label onto the icon. See `.overview__view-toggle`. */}
-                      <i
-                        className={`${icon}${viewMode === mode ? " is-light" : ""}`}
-                        aria-hidden
-                      ></i>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {/* Underline tabs, the same control as the question card's AI/Edited tabs — see
+                  `ModeToggle` — differing only in the colour of the bar, which is brand orange here.
+                  Its bar lines up with the bottom border of the three selects beside it; how that
+                  holds is in `.overview__view-toggle`. */}
+              <ModeToggle
+                className="overview__view-toggle"
+                ariaLabel="Project view"
+                value={viewMode}
+                onChange={changeViewMode}
+                options={VIEW_MODE_OPTIONS}
+              />
             </div>
           </div>
 
@@ -593,6 +674,7 @@ export default function OverviewView({
             loading={archiveLoading}
             liveProjectIds={liveProjectIds}
             onOpenProject={onOpenProject}
+            onChangeDealStatus={handleChangeDealStatus}
             onError={onError}
           />
         </>
