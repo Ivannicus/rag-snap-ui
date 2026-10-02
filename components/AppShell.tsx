@@ -1002,13 +1002,17 @@ export default function AppShell({
     setCreateError(null);
     if (!existingDocId) return;
 
+    // The handoff seeds the batch's document from `initialState` with no `docId` behind it, so it is on
+    // screen and editable while the modal is open. Left there, every edit after the discard would be
+    // dropped silently by `writeToSession` — there is no room to address it to.
+    handleCloseDoc();
     removeSavedFile(existingDocId).catch(() =>
       showError(
         "The batch may not have been discarded",
         "It could not be removed from the shared list. Check your connection, then remove it from the Overview dashboard."
       )
     );
-  }, [pendingProject, showError]);
+  }, [pendingProject, showError, handleCloseDoc]);
 
   /** The three tallies the top bar reports, counted once over the whole file. */
   const stateCounts = useMemo(() => {

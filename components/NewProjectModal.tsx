@@ -125,13 +125,19 @@ export default function NewProjectModal({
 
   // Escape closes, unless a create is already in flight — the write cannot be called back, so the
   // dialog stays put and reports what happened rather than vanishing mid-request.
+  //
+  // Not when backing out is destructive (`cancelLabel` set — the handoff's "Discard batch"): there it
+  // deletes a record the snap was already told was saved, and Escape is too easy to press from inside
+  // a field to be allowed to do that. The button is the only way out on that path.
+  const escapeCancels = !cancelLabel;
   useEffect(() => {
+    if (!escapeCancels) return;
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && !submitting) onCancel();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [submitting, onCancel]);
+  }, [escapeCancels, submitting, onCancel]);
 
   return (
     <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
