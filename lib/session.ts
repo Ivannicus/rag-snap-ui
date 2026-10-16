@@ -1,7 +1,7 @@
-import { ref, update, remove, onValue, get, runTransaction } from 'firebase/database';
+import { ref, update, remove, onValue, get, push, runTransaction, serverTimestamp } from 'firebase/database';
 import { db } from './firebase';
 import { SECTION_ALGO_VERSION } from './sectioning';
-import type { ItemStatus, ParsedQAFile, SessionState } from './types';
+import type { ItemStatus, ParsedQAFile, QuestionComment, SessionState } from './types';
 
 /**
  * Firebase RTDB forbids ".", "$", "#", "[", "]" and "/" in keys.
@@ -115,6 +115,7 @@ export function newSessionState(
     projectAssignees,
     sectionAssignees: {},
     sectionReviewers: {},
+    comments: {},
   };
 }
 
@@ -206,6 +207,7 @@ export function subscribeToSession(
         // mismatch: an unstamped room may well have been seeded by these very rules.
         sectionAlgoVersion:
           typeof val.sectionAlgoVersion === 'number' ? val.sectionAlgoVersion : undefined,
+        comments: decodeComments(val.comments),
       });
     }
   });
@@ -241,6 +243,110 @@ export async function getSessionOverlays(sessionId: string): Promise<{
     contextUrls: decodeKeys(val.contextUrls ?? {}),
     itemStatus: decodeKeys(val.itemStatus ?? mapLegacyApprovals(val.approvals)),
   };
+}
+
+// ── Comments ──
+//
+//   sessions/<id>/comments/<encodeKey(item.id)>/<pushId> = {
+//     authorId, authorName, authorPhoto, text, createdAt,
+//     resolvedAt?, resolvedById?, resolvedByName?        // present only while resolved
+//   }
+//
+// Inside the room rather than beside it, unlike `/presence`: comments change only when somebody acts,
+// so riding `subscribeToSession` costs nothing extra, and they belong to the project for as long as it
+// exists. Existing `sessions/$sessionId` rules cover them, so there is nothing new to deploy.
+
+interface StoredComment {
+  authorId?: string;
+  authorName?: string;
+  authorPhoto?: string | null;
+  text?: string;
+  createdAt?: unknown;
+  resolvedAt?: unknown;
+  resolvedById?: string;
+  resolvedByName?: string;
+}
+
+/**
+ * The raw `comments` node as item.id -> thread, oldest first. Entries too partial to draw (no text or no
+ * author) are skipped rather than rendered blank.
+ */
+function decodeComments(raw: unknown): Record<string, QuestionComment[]> {
+  const out: Record<string, QuestionComment[]> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [itemKey, thread] of Object.entries(raw as Record<string, Record<string, StoredComment>>)) {
+    const list: QuestionComment[] = [];
+    for (const [id, c] of Object.entries(thread ?? {})) {
+      if (!c || typeof c.text !== 'string' || !c.authorId) continue;
+      list.push({
+        id,
+        authorId: c.authorId,
+        authorName: c.authorName || c.authorId,
+        authorPhoto: c.authorPhoto ?? null,
+        text: c.text,
+        // A pending server timestamp is resolved locally to an estimate, so this is a number in practice;
+        // 0 would only sort a malformed entry first.
+        createdAt: typeof c.createdAt === 'number' ? c.createdAt : 0,
+        resolved:
+          typeof c.resolvedAt === 'number' && c.resolvedById
+            ? { byId: c.resolvedById, byName: c.resolvedByName || c.resolvedById, at: c.resolvedAt }
+            : undefined,
+      });
+    }
+    // Push ids sort chronologically, so they break a tie between two comments in the same millisecond.
+    list.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+    if (list.length) out[decodeKey(itemKey)] = list;
+  }
+  return out;
+}
+
+export interface CommentAuthor {
+  memberId: string;
+  name: string;
+  photoURL: string | null;
+}
+
+export function addComment(
+  sessionId: string,
+  itemId: string,
+  author: CommentAuthor,
+  text: string
+): Promise<void> {
+  // `push` returns a thenable reference rather than a Promise; settle it into one, as every other
+  // writer here returns.
+  return Promise.resolve(push(ref(db, `sessions/${sessionId}/comments/${encodeKey(itemId)}`), {
+    authorId: author.memberId,
+    authorName: author.name,
+    authorPhoto: author.photoURL,
+    text,
+    createdAt: serverTimestamp(),
+  })).then(() => undefined);
+}
+
+/**
+ * Resolve a comment (`by` set) or reopen it (`by` null).
+ *
+ * A transaction that aborts on a missing node, not an `update`: RTDB creates what it updates, so
+ * resolving a comment its author had just deleted would write back a ghost holding only the three
+ * resolution fields — the same hazard `updateExistingDoc` guards against for `savedFiles`.
+ */
+export function setCommentResolved(
+  sessionId: string,
+  itemId: string,
+  commentId: string,
+  by: CommentAuthor | null
+) {
+  const node = ref(db, `sessions/${sessionId}/comments/${encodeKey(itemId)}/${commentId}`);
+  return runTransaction(node, (current: StoredComment | null) => {
+    if (current === null) return; // deleted meanwhile: abort, write nothing
+    const { resolvedAt: _at, resolvedById: _id, resolvedByName: _name, ...open } = current;
+    if (!by) return open;
+    return { ...open, resolvedAt: serverTimestamp(), resolvedById: by.memberId, resolvedByName: by.name };
+  });
+}
+
+export function deleteComment(sessionId: string, itemId: string, commentId: string) {
+  return remove(ref(db, `sessions/${sessionId}/comments/${encodeKey(itemId)}/${commentId}`));
 }
 
 export function updateAnswer(sessionId: string, itemId: string, answer: string) {

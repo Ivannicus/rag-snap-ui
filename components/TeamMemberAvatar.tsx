@@ -1,7 +1,8 @@
 import type { TeamMember } from "@/lib/types";
 
 interface Props {
-  member: TeamMember;
+  // Only what is drawn, so a presence entry — which carries no email — can be passed as it is.
+  member: Pick<TeamMember, "name"> & { photoURL?: string | null };
   size?: "small" | "large";
 }
 

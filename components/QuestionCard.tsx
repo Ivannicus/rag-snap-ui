@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ModeToggle from "./ModeToggle";
+import TeamMemberAvatar from "./TeamMemberAvatar";
+import AnswerEditor from "./AnswerEditor";
+import CommentThread from "./CommentThread";
 import { isUnanswered, questionState } from "@/lib/utils";
-import type { QAItem } from "@/lib/types";
+import type { PresenceUser } from "@/lib/presence";
+import type { QAItem, QuestionComment } from "@/lib/types";
 
 /** Which of the two answers the card's single box is showing. */
 type AnswerMode = "ai" | "edited";
@@ -34,6 +38,25 @@ interface Props {
   /** Expansion is owned by AppShell, so it outlives this card's mount and is remembered per doc. */
   open: boolean;
   onSetOpen: (id: string, open: boolean) => void;
+  /**
+   * The other people with this question's editor open right now, never including the signed-in user.
+   * While there is anyone here, every writer of this answer on this card is locked.
+   */
+  editors?: PresenceUser[];
+  /**
+   * The signed-in user, shown first in the corner of their own open editor and labelled "(you)". Kept
+   * apart from `editors` because it must never lock this user out of their own box.
+   */
+  myPresence?: PresenceUser;
+  /** This question's comment thread, oldest first. Missing means nobody has commented. */
+  comments?: QuestionComment[];
+  onAddComment: (id: string, text: string) => void;
+  onSetCommentResolved: (id: string, commentId: string, resolved: boolean) => void;
+  onDeleteComment: (id: string, commentId: string) => void;
+  /** Take the lock on this question's editor; resolves false when somebody else got there first. */
+  onClaimEditing: (id: string) => Promise<boolean>;
+  /** Hold the lock for as long as the editor is open; the returned teardown releases it. */
+  onPublishEditing: (id: string) => () => void;
 }
 
 /** Highlight search term occurrences in text */
@@ -46,31 +69,119 @@ function highlight(text: string, term: string): React.ReactNode {
   );
 }
 
-/** Render markdown-ish answer with optional search highlighting: bold, bullets, line breaks */
+/**
+ * Inline formatting: `**bold**`, `*italic*`, `<u>underline</u>` — what `AnswerEditor`'s toolbar writes.
+ * Bold is tried before italic so `**` is never read as two italic markers. Italic's markers must hug
+ * their text (`*word*`, not `5 * 3 * 2`), so arithmetic and stray asterisks in an AI answer stay literal.
+ * Bold's closing `**` may not be followed by a third star: italic ending inside a bold run writes
+ * `**bold *italic***`, and without that the bold would close one star early and strand the italic.
+ */
+const INLINE = /\*\*(.+?)\*\*(?!\*)|<u>(.+?)<\/u>|\*(?=[^\s*])(.+?)(?<=[^\s*])\*/;
+
+function renderInline(text: string, searchTerm: string, keyPrefix = ""): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let rest = text;
+  let i = 0;
+  while (rest) {
+    const match = INLINE.exec(rest);
+    if (!match) {
+      out.push(<React.Fragment key={`${keyPrefix}${i}`}>{highlight(rest, searchTerm)}</React.Fragment>);
+      break;
+    }
+    if (match.index > 0) {
+      out.push(
+        <React.Fragment key={`${keyPrefix}${i++}`}>{highlight(rest.slice(0, match.index), searchTerm)}</React.Fragment>
+      );
+    }
+    const key = `${keyPrefix}${i++}`;
+    const [, bold, underline, italic] = match;
+    // Recursive, so formats nest: `**bold *and italic***`, `<u>**both**</u>`.
+    if (bold !== undefined) out.push(<strong key={key}>{renderInline(bold, searchTerm, `${key}.`)}</strong>);
+    else if (underline !== undefined) out.push(<u key={key}>{renderInline(underline, searchTerm, `${key}.`)}</u>);
+    else out.push(<em key={key}>{renderInline(italic, searchTerm, `${key}.`)}</em>);
+    rest = rest.slice(match.index + match[0].length);
+  }
+  return out;
+}
+
+const BULLET_LINE = /^[-*]\s+/;
+const NUMBER_LINE = /^\d+[.)]\s+/;
+
+/**
+ * Render a markdown-ish answer with optional search highlighting: the inline formats above, `- ` / `* `
+ * bullets, `1. ` numbered items, and line breaks. Consecutive list lines become one real `<ul>` / `<ol>`
+ * — the bullets used to be bare `<li>`s with no list around them.
+ */
 function renderAnswer(text: string, searchTerm: string): React.ReactNode {
+  const blocks: React.ReactNode[] = [];
   const lines = text.split("\n");
-  return lines.map((line, idx) => {
-    const isBullet = /^[-*]\s/.test(line);
-    const lineContent = isBullet ? line.replace(/^[-*]\s+/, "") : line;
-    const boldParts = lineContent.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
-      const isBoldMarker = part.startsWith("**") && part.endsWith("**");
-      const inner = isBoldMarker ? part.slice(2, -2) : part;
-      const highlighted = highlight(inner, searchTerm);
-      return isBoldMarker
-        ? <strong key={i}>{highlighted}</strong>
-        : <React.Fragment key={i}>{highlighted}</React.Fragment>;
-    });
-    return (
-      <React.Fragment key={idx}>
-        {isBullet ? (
-          <li className="answer-bullet">{boldParts}</li>
-        ) : (
-          <span>{boldParts}</span>
-        )}
-        {idx < lines.length - 1 && !isBullet && <br />}
-      </React.Fragment>
-    );
-  });
+  let i = 0;
+  while (i < lines.length) {
+    const kind = BULLET_LINE.test(lines[i]) ? "ul" : NUMBER_LINE.test(lines[i]) ? "ol" : null;
+    if (kind) {
+      const prefix = kind === "ul" ? BULLET_LINE : NUMBER_LINE;
+      const items: React.ReactNode[] = [];
+      while (i < lines.length && prefix.test(lines[i])) {
+        items.push(<li key={i}>{renderInline(lines[i].replace(prefix, ""), searchTerm)}</li>);
+        i++;
+      }
+      const List = kind;
+      blocks.push(<List key={`list-${i}`} className="answer-list">{items}</List>);
+      continue;
+    }
+    // A run of plain lines, kept as one block with the breaks between them.
+    const run: React.ReactNode[] = [];
+    while (i < lines.length && !BULLET_LINE.test(lines[i]) && !NUMBER_LINE.test(lines[i])) {
+      if (run.length) run.push(<br key={`br-${i}`} />);
+      run.push(<React.Fragment key={i}>{renderInline(lines[i], searchTerm)}</React.Fragment>);
+      i++;
+    }
+    blocks.push(<span key={`text-${i}`} className="answer-text">{run}</span>);
+  }
+  return blocks;
+}
+
+/**
+ * The avatars of whoever else is in this question's edit box, for the corner of whichever box is on
+ * screen. Each avatar is a hover/focus target whose tooltip gives that person's full name — the face
+ * alone is not always enough, and a placeholder avatar has no face at all.
+ *
+ * The tooltip opens *down and inward*: `.question-card` and its body both clip their overflow, so one
+ * opening upwards or outwards from a corner would be cut off.
+ */
+function PresenceBadges({
+  editors,
+  meId,
+  corner,
+}: {
+  editors: PresenceUser[];
+  /** Whose avatar is the signed-in user's own, so its tooltip can say so. */
+  meId?: string;
+  corner: "left" | "right";
+}) {
+  return (
+    <span className={`question-card__presence question-card__presence--${corner} member-stack`}>
+      {editors.map((editor) => {
+        const label =
+          editor.memberId === meId ? `${editor.name} (you)` : `${editor.name} is editing`;
+        return (
+          <span
+            key={editor.memberId}
+            // Focusable so the name is reachable from the keyboard as well; Vanilla shows the message on
+            // `:focus` as well as `:hover`.
+            tabIndex={0}
+            aria-label={label}
+            className={`member-stack__item ${corner === "right" ? "p-tooltip--btm-right" : "p-tooltip"}`}
+          >
+            <TeamMemberAvatar member={editor} size="small" />
+            <span className="p-tooltip__message" role="tooltip" aria-hidden>
+              {label}
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -152,8 +263,18 @@ export default function QuestionCard({
   onUnapprove,
   open,
   onSetOpen,
+  editors,
+  myPresence,
+  comments,
+  onAddComment,
+  onSetCommentResolved,
+  onDeleteComment,
+  onClaimEditing,
+  onPublishEditing,
 }: Props) {
   const [editingRequested, setEditingRequested] = useState(false);
+  /** A claim on the lock is in flight. Blocks a second click from sending a second one. */
+  const [claiming, setClaiming] = useState(false);
   const [draft, setDraft] = useState("");
   /**
    * Which answer the box shows once there are two. Starts on the edited one, so a card with an edit
@@ -191,7 +312,72 @@ export default function QuestionCard({
    * collaborator's approval did.
    */
   const editing = editingRequested && !approved && !viewingOriginal;
-  const confirmingRevert = revertRequested && !approved;
+  /** The box is showing the AI's answer: before the first edit, or on the toggle's AI Answer side. */
+  const showRating = !editing && (!hasEdit || viewingOriginal);
+
+  const busy = editors !== undefined && editors.length > 0;
+  const openComments = comments?.filter((c) => !c.resolved).length ?? 0;
+
+  /**
+   * Why Approve is disabled, if it is. The section's reason first — not the reviewer, or no reviewer —
+   * since it is the one that holds whatever happens on this card. Then open comments: an answer cannot
+   * be signed off while somebody's critique of it is still unaddressed, so they are resolved first.
+   *
+   * Only *approving* waits on comments. An answer already approved when a comment arrives stays approved
+   * — withdrawing it is a deliberate, confirmed act, never a side effect — and Withdraw is not gated.
+   */
+  const approveBlockedReason =
+    approveDisabledReason ??
+    (openComments > 0
+      ? `Resolve ${openComments === 1 ? "the open comment" : `all ${openComments} open comments`} to approve.`
+      : undefined);
+  // Who the open editor's corner shows: me first, then anyone who got in alongside me (only a lost race
+  // can produce one). The card is outlined whenever anyone at all — me included — has the editor open.
+  const editorBadges = editing && myPresence ? [myPresence, ...(editors ?? [])] : editors ?? [];
+  const outlined = busy || (editing && myPresence !== undefined);
+
+  /**
+   * Somebody else has this question's editor open, so this user may not change the answer: not open the
+   * editor, not Edit, not Revert. One editor per question — two drafts of one answer would mean the
+   * second Save silently overwrote the first. Never set while this user is editing: their own lock is
+   * not in `editors`, and a lost race that let both in still lets both finish.
+   */
+  const lockedBy = !editing && busy ? editors : undefined;
+  const lockReason = lockedBy
+    ? `${lockedBy.map((editor) => editor.name).join(" and ")} ${
+        lockedBy.length === 1 ? "is" : "are"
+      } editing this answer. You can edit it once they’re done.`
+    : undefined;
+  const confirmingRevert = revertRequested && !approved && !lockedBy;
+
+  /**
+   * The AI answer must be rated before anyone edits it, so every edit starts from a judgement of what the
+   * AI produced. Any rating counts — ratings are one per question, not per person — and an unanswered AI
+   * answer is exempt, since there is nothing there to rate.
+   */
+  const needsRating = !unanswered && rating === undefined;
+  const editBlockedReason =
+    lockReason ??
+    (needsRating
+      ? // An edit made before this rule may have no rating, and the stars are not shown on the Edited
+        // Answer side — so say where they are.
+        hasEdit
+        ? "Rate the AI answer before editing. Switch to AI Answer to rate it."
+        : "Rate the AI answer before editing it."
+      : undefined);
+
+  /**
+   * Hold the lock for exactly as long as the editor is open — through an effect rather than from the
+   * buttons that open and close it, because the editor can close with no click at all: `editing` is
+   * derived, so a collaborator's approval closes it with no event, and a filter change or a doc switch
+   * unmounts the card outright. The cleanup releases the lock on every one of those paths.
+   *
+   * The open editor, not focus: switching windows mid-draft must not hand the box to somebody else.
+   */
+  useEffect(() => {
+    if (!editing) return;
+    return onPublishEditing(item.id);
+  }, [editing, item.id, onPublishEditing]);
 
   function setEditing(next: boolean) {
     setEditingRequested(next);
@@ -201,8 +387,14 @@ export default function QuestionCard({
     setRevertRequested(next);
   }
 
-  function startEdit() {
-    if (approved || viewingOriginal) return;
+  async function startEdit() {
+    if (approved || viewingOriginal || editBlockedReason || claiming) return;
+    setClaiming(true);
+    const claimed = await onClaimEditing(item.id);
+    setClaiming(false);
+    // Lost the race: somebody else's claim committed first. Their presence is already on its way, and
+    // when it lands this card shows the lock line naming them, so there is nothing more to say here.
+    if (!claimed) return;
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
     onSetOpen(item.id, true);
@@ -223,7 +415,7 @@ export default function QuestionCard({
   }
 
   function requestRevert() {
-    if (approved) return;
+    if (approved || lockedBy) return;
     setConfirmingRevert(true);
   }
 
@@ -233,6 +425,23 @@ export default function QuestionCard({
     setConfirmingRevert(false);
   }
 
+  /**
+   * The one Edit control, beside Copy in whichever answer box can be edited: the plain AI answer before
+   * the first edit, the Edited Answer after it. Same button, same place, either way — it used to be a
+   * blue "Edit response" link under an unedited answer and an "Edit again" button inside an edited one.
+   * Disabled while somebody else holds the lock (their name is the tooltip) or a claim is in flight.
+   */
+  const editButton = (
+    <button
+      onClick={(e) => { e.stopPropagation(); startEdit(); }}
+      disabled={editBlockedReason !== undefined || claiming}
+      title={editBlockedReason ?? "Edit answer"}
+      className="p-button--base is-dense u-no-margin--bottom"
+    >
+      <i className="p-icon--edit"></i> Edit
+    </button>
+  );
+
   return (
     <>
     <div
@@ -241,7 +450,7 @@ export default function QuestionCard({
       // than a fourth state: an edit is a fact about a `ready` answer, not a replacement for it.
       className={`p-card question-card question-card--${state}${
         state === "ready" && hasEdit ? " question-card--edited" : ""
-      }`}
+      }${outlined ? " question-card--busy" : ""}`}
     >
       {/* Question row — clickable to expand. Two rows inside, not one: the meta row holds the id, the
           status badges and the chevron, and the question text has the full width of the card beneath
@@ -249,7 +458,7 @@ export default function QuestionCard({
           question wrapped differently depending on how many badges its card happened to carry. */}
       <button
         onClick={() => onSetOpen(item.id, !open)}
-        className="question-card__header"
+        className={`question-card__header${open ? " is-open" : ""}`}
       >
         <span className="question-card__meta">
           {/* ID badge */}
@@ -263,6 +472,18 @@ export default function QuestionCard({
 
           {/* Status badges, as one group so they stay together against the right edge. */}
           <span className="question-card__badges">
+            {/* Open comments: something on this question is waiting to be addressed. First, since it is
+                the one badge asking somebody to act. Gone once every comment is resolved — a resolved
+                thread is history, not a to-do. */}
+            {openComments > 0 && (
+              <span
+                className="section-header__block section-header__block--comments"
+                title={`${openComments} unresolved ${openComments === 1 ? "comment" : "comments"}`}
+              >
+                <i className="p-icon--comments" aria-hidden></i> {openComments} Unresolved
+              </span>
+            )}
+
             {/* Approved badge. First of the status badges, since sign-off is the state that overrides the
                 others: an approved question is done regardless of whether it was edited on the way. */}
             {approved && (
@@ -354,13 +575,14 @@ export default function QuestionCard({
 
             {editing ? (
               <>
-                <textarea
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  rows={Math.max(4, draft.split("\n").length + 1)}
-                  className="u-no-margin--bottom"
-                />
+                {/* Wrapped so the presence badge has a box to sit in the corner of: the right end of the
+                    formatting toolbar, clear of the text. */}
+                <div className="question-card__editor">
+                  <AnswerEditor value={draft} onChange={setDraft} />
+                  {editorBadges.length > 0 && (
+                    <PresenceBadges editors={editorBadges} meId={myPresence?.memberId} corner="right" />
+                  )}
+                </div>
                 <div className="question-card__edit-actions">
                   <button
                     onClick={(e) => { e.stopPropagation(); saveEdit(); }}
@@ -387,8 +609,9 @@ export default function QuestionCard({
             ) : viewingOriginal || !hasEdit ? (
               /* The AI answer. Muted once an edit exists — and struck through as well when it was a
                  non-answer — since it is then the superseded one of the two, and styled as the plain
-                 answer it is before that. Copy is its only control in either case: every writer of
-                 `editedAnswers` lives on the Edited Answer side. */
+                 answer it is before that. Before the first edit it carries the Edit button beside
+                 Copy; once an edit exists it is read-only and Copy is its only control, since every
+                 writer of `editedAnswers` then lives on the Edited Answer side. */
               <div
                 className={`question-card__answer ${
                   unanswered
@@ -401,28 +624,27 @@ export default function QuestionCard({
                 }`}
               >
                 {renderAnswer(item.answer, searchTerm)}
+                {busy && <PresenceBadges editors={editors} corner="left" />}
                 <div className="question-card__answer-actions">
                   <CopyButton text={item.answer} />
+                  {!hasEdit && !approved && editButton}
                 </div>
               </div>
             ) : (
               <div className="question-card__answer question-card__answer--edited">
                 {renderAnswer(editedAnswer!, searchTerm)}
+                {busy && <PresenceBadges editors={editors} corner="left" />}
                 {/* Copy survives approval; the two writers do not — an approved answer is frozen
                     until the approval is withdrawn. */}
                 <div className="question-card__answer-actions">
                   <CopyButton text={editedAnswer!} />
                   {!approved && (
                     <>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); startEdit(); }}
-                        className="p-button--base is-dense u-no-margin--bottom"
-                      >
-                        <i className="p-icon--edit"></i> Edit again
-                      </button>
+                      {editButton}
                       <button
                         onClick={(e) => { e.stopPropagation(); requestRevert(); }}
-                        title="Revert to original"
+                        disabled={lockedBy !== undefined}
+                        title={lockReason ?? "Revert to original"}
                         className="p-button--base is-dense u-no-margin--bottom"
                       >
                         <i className="p-icon--close">
@@ -438,27 +660,67 @@ export default function QuestionCard({
 
           {/* The state of the Edit control, for the states that have no control of their own. Each of
               these says why there is nothing to click rather than leaving a gap where a button was, a
-              gap reading as a bug. Editing has its own buttons, and the Edited Answer side carries
-              Edit again inside the box. */}
+              gap reading as a bug. Editing has its own buttons, and otherwise Edit sits beside Copy in
+              the answer box. */}
           {editing ? null : approved ? (
             /* Frozen. The way back is the Withdraw approval button just below. */
             <p className="u-text--muted p-text--small u-no-margin--bottom">
               <i className="p-icon--lock-locked" aria-hidden></i> Approved answers can&rsquo;t be
               edited. Withdraw the approval below to change this one.
             </p>
+          ) : lockReason ? (
+            /* Someone else has the editor open. Ahead of the read-only note below: whichever side of
+               the toggle is showing, this is the reason there is nothing to click right now. */
+            <p className="u-text--muted p-text--small u-no-margin--bottom">
+              <i className="p-icon--lock-locked" aria-hidden></i> {lockReason}
+            </p>
           ) : viewingOriginal ? (
             <p className="u-text--muted p-text--small u-no-margin--bottom">
               <i className="p-icon--lock-locked" aria-hidden></i> The AI&rsquo;s answer is read-only.
               Switch to Edited Answer to make changes.
             </p>
-          ) : !hasEdit ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); startEdit(); }}
-              className="p-button--link u-no-margin--bottom u-align--left"
-            >
-              <i className="p-icon--edit"></i> Edit response
-            </button>
           ) : null}
+
+          {/* ── Rating ──
+              A rating is of the AI's answer, so it is shown only while the box is showing that answer:
+              always before the first edit (there is no toggle yet), and afterwards only on the AI Answer
+              side. Switching to Edited Answer takes it away and Approve moves up into its place. Hidden
+              while the editor is open too, since the box is then the draft, not the AI's answer.
+
+              Above Approve, because it comes first: Edit stays disabled until the AI answer has a
+              rating (`needsRating`), so the rating is the first thing anybody does to a question. An
+              unanswered AI answer has nothing to rate, so its stars are greyed and it is exempt —
+              otherwise a blank could never be filled in. */}
+          {showRating && (
+            <div className="question-card__section question-card__rating">
+              {unanswered ? (
+                <div className="star-rating">
+                  <span className="u-text--muted p-text--small u-no-margin--bottom">Rate:</span>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <svg key={star} className="star-rating__star-icon" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                  ))}
+                  <span className="u-text--muted p-text--small u-no-margin--bottom">
+                    Not ratable — unanswered
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <StarRating
+                    rating={rating}
+                    onRate={(r) => onSaveRating(item.id, r)}
+                    onClear={() => onClearRating(item.id)}
+                  />
+                  {needsRating && !approved && (
+                    <span className="question-card__rating-hint u-text--muted p-text--small u-no-margin--bottom">
+                      Rate the AI answer to start editing.
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {/* ── Approval ──
               The only writer of `itemStatus`, and so the only way a question reaches the approved band
@@ -488,20 +750,35 @@ export default function QuestionCard({
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); onApprove(item.id); }}
-                  disabled={approveDisabledReason !== undefined}
-                  title={approveDisabledReason}
+                  disabled={approveBlockedReason !== undefined}
+                  title={approveBlockedReason}
                   className="p-button--positive is-dense u-no-margin--bottom"
                 >
                   <i className="p-icon--success is-light" aria-hidden></i> Approve
                 </button>
                 <span className="u-text--muted p-text--small u-no-margin--bottom">
-                  {approveDisabledReason ??
+                  {approveBlockedReason ??
                     (unanswered && !hasEdit
                       ? "Still unanswered — approve only if no answer is needed."
                       : "Ready for review.")}
                 </span>
               </>
             )}
+          </div>
+
+          {/* ── Comments ──
+              Under the approval row, where a reviewer who will not approve says why. Open to anyone
+              signed in, and independent of approval and of the editor lock: a comment changes nothing
+              about the answer itself. */}
+          <div className="question-card__section">
+            <CommentThread
+              questionId={item.id}
+              comments={comments}
+              myMemberId={myPresence?.memberId}
+              onAdd={(text) => onAddComment(item.id, text)}
+              onSetResolved={(commentId, resolved) => onSetCommentResolved(item.id, commentId, resolved)}
+              onDelete={(commentId) => onDeleteComment(item.id, commentId)}
+            />
           </div>
 
           {/* No per-question assignment. Work is handed out a section at a time, in the section
@@ -514,28 +791,6 @@ export default function QuestionCard({
               removed are still stored and still exported; the badge in the header row above is all
               that reads them now. */}
 
-          {/* ── Rating ── */}
-          <div className="question-card__section">
-            {unanswered && !hasEdit ? (
-              <div className="star-rating">
-                <span className="u-text--muted p-text--small u-no-margin--bottom">Rate:</span>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <svg key={star} className="star-rating__star-icon" width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                ))}
-                <span className="u-text--muted p-text--small u-no-margin--bottom">
-                  Not ratable — unanswered
-                </span>
-              </div>
-            ) : (
-              <StarRating
-                rating={rating}
-                onRate={(r) => onSaveRating(item.id, r)}
-                onClear={() => onClearRating(item.id)}
-              />
-            )}
-          </div>
         </div>
       </div>
     </div>

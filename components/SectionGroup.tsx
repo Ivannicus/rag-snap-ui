@@ -3,7 +3,8 @@
 import QuestionCard from "./QuestionCard";
 import TeamMemberSelect from "./TeamMemberSelect";
 import { questionState } from "@/lib/utils";
-import type { ItemStatus, QAItem, SectionInfo, TeamMember } from "@/lib/types";
+import type { PresenceUser } from "@/lib/presence";
+import type { ItemStatus, QAItem, QuestionComment, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
   section: SectionInfo;
@@ -55,6 +56,19 @@ interface Props {
    * name the current reviewer even when that person is no longer an owner.
    */
   assignableMembers: TeamMember[];
+  /** item.id → the *other* people who have that question's editor open. */
+  questionEditors: Record<string, PresenceUser[]>;
+  /** The signed-in user as a presence entry, for their own avatar on their own open editor. */
+  myPresence?: PresenceUser;
+  /** item.id -> that question's comment thread, oldest first. */
+  comments: Record<string, QuestionComment[]>;
+  onAddComment: (id: string, text: string) => void;
+  onSetCommentResolved: (id: string, commentId: string, resolved: boolean) => void;
+  onDeleteComment: (id: string, commentId: string) => void;
+  /** Take the lock on a question's editor; resolves false when somebody else holds it. */
+  onClaimEditing: (id: string) => Promise<boolean>;
+  /** Hold the lock while an editor is open; the returned teardown releases it. */
+  onPublishEditing: (id: string) => () => void;
 }
 
 export default function SectionGroup({
@@ -85,6 +99,14 @@ export default function SectionGroup({
   myMemberId,
   teamMembers,
   assignableMembers,
+  questionEditors,
+  myPresence,
+  comments,
+  onAddComment,
+  onSetCommentResolved,
+  onDeleteComment,
+  onClaimEditing,
+  onPublishEditing,
 }: Props) {
   // The section's own tallies, through `questionState` so they are the same three disjoint buckets the
   // dashboard counts and the card hues use. Ready and Approved are counted separately: a section is
@@ -93,7 +115,6 @@ export default function SectionGroup({
   for (const item of items) {
     counts[questionState(item.answer, editedAnswers[item.id], itemStatus[item.id] === "approved")]++;
   }
-  const editedCount = items.filter((i) => editedAnswers[i.id] !== undefined).length;
 
   // Keyed on list position, not on section.key. Keys are used verbatim from explicit labels, so they
   // carry spaces and punctuation an id cannot; squeezing those out collides — "A/B" and "A B" both
@@ -116,9 +137,9 @@ export default function SectionGroup({
     ? teamMembers.find((m) => m.id === sectionReviewer)
     : undefined;
   const approveDisabledReason = !sectionReviewer
-    ? `${section.label} has no reviewer yet. Approval is the reviewer's to give, so assign one above first.`
+    ? "Assign a reviewer to approve."
     : sectionReviewer !== myMemberId
-    ? `Only ${reviewer?.name ?? "this section's reviewer"} can approve ${section.label}.`
+    ? `Only ${reviewer?.name ?? "the reviewer"} can approve.`
     : undefined;
 
   /**
@@ -146,57 +167,75 @@ export default function SectionGroup({
       : undefined;
 
   return (
-    <div>
-      {/* Section header */}
+    // The container the header's layout queries: one row when the section is wide enough for every
+    // slot, two when it is not, a wrapping row below that. See `.section-header` in globals.scss.
+    <div className="section-group">
+      {/* Section header. Every box has its own fixed slot, so nothing moves with a name's length or a
+          count's digits and the toggle always sits at the far right. */}
       <div className="section-header">
-        <span className="p-heading--5 u-no-margin--bottom">{section.label}</span>
+        {/* The title cell is the one elastic slot: the label takes what it needs (ellipsed past that, with
+            the full label on hover) and the rule fills the rest. */}
+        <div className="section-header__title">
+          <span className="p-heading--5 u-no-margin--bottom section-header__label" title={section.label}>
+            {section.label}
+          </span>
+          <div className="section-header__rule" />
+        </div>
 
         {/* Assignee and reviewer, one clickable box each. Both read straight off the section's
             identity, so every question in the section shows the same assignment however the list is
             filtered. The offered list is the project's owners, not the whole bank — see `optionsFor`. */}
-        <TeamMemberSelect
-          label="Assignee:"
-          value={sectionAssignee}
-          teamMembers={optionsFor(sectionAssignee)}
-          emptyHint={noOwnersHint}
-          onSelect={(memberId) => onSaveSectionAssignee(section.key, memberId)}
-          onClear={() => onClearSectionAssignee(section.key)}
-        />
-        <TeamMemberSelect
-          label="Reviewer:"
-          value={sectionReviewer}
-          teamMembers={optionsFor(sectionReviewer)}
-          emptyHint={noOwnersHint}
-          onSelect={(memberId) => onSaveSectionReviewer(section.key, memberId)}
-          onClear={() => onClearSectionReviewer(section.key)}
-        />
+        <div className="section-header__slot section-header__slot--assignee">
+          <TeamMemberSelect
+            label="Assignee:"
+            value={sectionAssignee}
+            teamMembers={optionsFor(sectionAssignee)}
+            emptyHint={noOwnersHint}
+            onSelect={(memberId) => onSaveSectionAssignee(section.key, memberId)}
+            onClear={() => onClearSectionAssignee(section.key)}
+          />
+        </div>
+        <div className="section-header__slot section-header__slot--reviewer">
+          <TeamMemberSelect
+            label="Reviewer:"
+            value={sectionReviewer}
+            teamMembers={optionsFor(sectionReviewer)}
+            emptyHint={noOwnersHint}
+            onSelect={(memberId) => onSaveSectionReviewer(section.key, memberId)}
+            onClear={() => onClearSectionReviewer(section.key)}
+          />
+        </div>
 
-        <span className="section-header__block">
-          {items.length} {items.length === 1 ? "Question" : "Questions"}
+        <span className="section-header__slot section-header__slot--questions section-header__block">
+          <span className="section-header__count">{items.length}</span>
+          {items.length === 1 ? "Question" : "Questions"}
         </span>
-        {/* Band tints, the same three the dashboard sizes its ring with, so a section's badges and a
-            project's progress cannot read as different colours for the same state. */}
-        {counts.approved > 0 && (
-          <span className="section-header__block section-header__block--band-approved">
-            {counts.approved} Approved
+        {/* The three bands, always all three, in `STATUS_BANDS` order. A band at zero keeps its box and
+            says 0, but drops its tint and fades: the slot stays put, so the boxes after it do not slide
+            left, and the colour is kept for counts that mean something. Band tints are the dashboard's
+            own, so a section's badges and a project's ring cannot disagree about a state's colour.
+
+            No Edited badge here: edits are shown on each question card, and a fourth count crowded the
+            row for something the three bands already account for. */}
+        {(
+          [
+            ["approved", "Approved"],
+            ["ready", "Ready"],
+            ["unanswered", "Unanswered"],
+          ] as const
+        ).map(([band, label]) => (
+          <span
+            key={band}
+            className={`section-header__slot section-header__slot--${band} section-header__block ${
+              counts[band] > 0
+                ? `section-header__block--band-${band}`
+                : "section-header__block--zero"
+            }`}
+          >
+            <span className="section-header__count">{counts[band]}</span>
+            {label}
           </span>
-        )}
-        {counts.ready > 0 && (
-          <span className="section-header__block section-header__block--band-ready">
-            {counts.ready} Ready
-          </span>
-        )}
-        {counts.unanswered > 0 && (
-          <span className="section-header__block section-header__block--band-unanswered">
-            {counts.unanswered} Unanswered
-          </span>
-        )}
-        {editedCount > 0 && (
-          <span className="section-header__block section-header__block--caution">
-            {editedCount} Edited
-          </span>
-        )}
-        <div className="section-header__rule" />
+        ))}
 
         {/* Whole-section toggle. Last in the row, past the rule, so it sits at the right edge. */}
         <button
@@ -205,7 +244,7 @@ export default function SectionGroup({
           aria-expanded={open}
           aria-controls={panelId}
           title={open ? "Collapse section" : "Expand section"}
-          className="section-header__toggle"
+          className="section-header__slot section-header__slot--toggle section-header__toggle"
         >
           <i className={open ? "p-icon--chevron-up" : "p-icon--chevron-down"}></i>
           <span className="u-off-screen">
@@ -235,6 +274,14 @@ export default function SectionGroup({
             onUnapprove={onUnapprove}
             open={expandedIds[item.id] === true}
             onSetOpen={onSetExpanded}
+            editors={questionEditors[item.id]}
+            myPresence={myPresence}
+            comments={comments[item.id]}
+            onAddComment={onAddComment}
+            onSetCommentResolved={onSetCommentResolved}
+            onDeleteComment={onDeleteComment}
+            onClaimEditing={onClaimEditing}
+            onPublishEditing={onPublishEditing}
           />
         ))}
       </div>
