@@ -158,6 +158,16 @@ export function computeProjectStats(
   // negative and invert the wheel.
   const ready = Math.max(0, itemCount - approved - unanswered);
 
+  // Only well-formed ratings count: a room is written by any client, and one stray value would skew an
+  // average that is shown to one decimal place.
+  let ratedCount = 0;
+  let ratingSum = 0;
+  for (const value of Object.values(ratings)) {
+    if (typeof value !== 'number' || !(value >= 1 && value <= 5)) continue;
+    ratedCount += 1;
+    ratingSum += value;
+  }
+
   return {
     itemCount,
     approved,
@@ -166,7 +176,8 @@ export function computeProjectStats(
     approvedFraction: itemCount > 0 ? approved / itemCount : 0,
     complete: itemCount > 0 && approved === itemCount,
     editedCount: Object.keys(editedAnswers).length,
-    ratedCount: Object.keys(ratings).length,
+    ratedCount,
+    ratingSum,
   };
 }
 

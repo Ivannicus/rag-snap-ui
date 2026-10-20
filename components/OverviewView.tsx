@@ -101,7 +101,8 @@ export default function OverviewView({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [tab, setTab] = useState<Tab>("projects");
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  // List is the default for anyone who has never picked; a stored choice of either wins after mount.
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [sortKey, setSortKey] = useState<SortKey>("dueDate");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -116,7 +117,7 @@ export default function OverviewView({
   // `AppShell` loads the dark-mode preference in an effect.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-safe read of a stored preference
-    if (localStorage.getItem(VIEW_MODE_KEY) === "list") setViewMode("list");
+    if (localStorage.getItem(VIEW_MODE_KEY) === "cards") setViewMode("cards");
   }, []);
 
   const changeViewMode = useCallback((next: ViewMode) => {
@@ -437,9 +438,6 @@ export default function OverviewView({
       <div className="overview__head">
         <div>
           <h2 className="p-heading--4 u-no-margin--bottom">Overview</h2>
-          <p className="u-text--muted p-text--small u-no-margin--bottom">
-            Every project in the shared list, with live progress as the team works.
-          </p>
         </div>
         <div className="overview__tabs">
           {/* The same underline tabs as the Cards/List switch below, brand orange bar and all — see
@@ -461,7 +459,7 @@ export default function OverviewView({
           <button
             type="button"
             onClick={onNewProject}
-            className="p-button--positive is-dense u-no-margin--bottom file-loader__button"
+            className="p-button--positive is-dense u-no-margin--bottom file-loader__button overview__new-project"
           >
             <i className="p-icon--plus is-light" aria-hidden></i> New project
           </button>
@@ -632,11 +630,12 @@ export default function OverviewView({
                 <span className="u-text--muted p-text--small">Project</span>
                 <span className="u-text--muted p-text--small">Progress</span>
                 {STATUS_BANDS.map((band) => (
-                  <span key={band.key} className="u-text--muted p-text--small">
+                  <span key={band.key} className="u-text--muted p-text--small project-list__band-head">
                     {band.short}
                   </span>
                 ))}
                 <span className="u-text--muted p-text--small">Team</span>
+                <span className="u-text--muted p-text--small">Due</span>
               </div>
               {visibleProjects.map((project) => (
                 <ProjectListRow
@@ -648,6 +647,7 @@ export default function OverviewView({
                   onToggleSelected={toggleSelected}
                   onOpen={onOpenProject}
                   onChangeOwners={handleChangeOwners}
+                  onChangeDueDate={handleChangeDueDate}
                 />
               ))}
             </div>

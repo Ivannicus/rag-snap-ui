@@ -217,48 +217,48 @@ a control column whose width its halves have to share.
 cannot show different numbers in the two views. Persisted to `localStorage` under `overviewViewMode`,
 read in an effect rather than in the initial state because `output: 'export'` prerenders this component
 and a stored initial value would not match the prerendered HTML (`AppShell` loads dark mode the same
-way).
+way). **List is the default** for someone who has never picked; the effect only switches to cards when
+that is what is stored.
 
-The list is **not a slimmed-down card**. It carries name, an approved bar, the three status counts and
-owners, and deliberately drops the wheel, due date, uploader, export stamp and the Open button — the
-filename is the open target. A row that carried everything would be a card again, only narrower. So
-`ProjectListRow` takes no `onChangeDueDate`; due dates are edited in the card view.
+The list is **not a slimmed-down card**. It carries name, an approved bar, the three status counts,
+owners and the due date, and deliberately drops the wheel, export stamp and the Open button — the
+filename is the open target. A row that carried everything would be a card again, only narrower. The due
+date is the same `DueDateField` as the card's, through the same `onChangeDueDate`: a view that could not
+set one sent people back to the cards to do it.
 
 Its grid template lives on **`.project-list__row`, not on the container**, because each row needs its
 own border and selected/overdue state and `display: contents` would discard both. Repeating the template
 is what aligns the columns down the page, and it is why **no track is `auto`** — `auto` sizes itself per
 row and staggers the values. The widths are custom properties on `.project-list` — `--list-col-select`,
 `--list-col-name`, `--list-col-bar`, `--list-col-approved`, `--list-col-ready`, `--list-col-unanswered`,
-`--list-col-team` — so the header row, the project rows and the narrow-screen flex bases all read them
+`--list-col-team`, `--list-col-due` — so the header row, the project rows and the narrow-screen flex bases all read them
 from one place.
 
 **The name is the only elastic track** (`minmax(18rem, 1fr)`); every other one is fixed. That is what
-puts the whole right-hand group — bar, three bands, team — flush against the row's right edge instead of
+puts the whole right-hand group — bar, three bands, team, due — flush against the row's right edge instead of
 leaving dead space there, and the name is the right track to absorb it because its content ellipses
 anyway. Alignment down the page survives precisely because nothing else is elastic: **a second `1fr`
 would break it.**
 
 Note what that does and does not mean: the *group* of columns is anchored to the row's right edge, while
 the content of every column — heading and cell alike — reads from that column's own left edge. Both
-requested, and they are not in tension.
+requested, and they are not in tension. The exception is the three band columns, whose heading and
+number-only badge are both centred (`.project-list__band-head`, `.project-list__badge`), so the number
+sits under the middle of the word naming it.
 
 Two more consequences worth not undoing:
 
-- **Each status band owns a track**, and `ProjectListRow` renders a `.project-list__badge` wrapper for
-  every band whether or not its count is nonzero. A band at zero drops its badge and leaves the cell
-  empty; dropping the wrapper instead would let the bands after it slide left out from under their
-  headings. The three tracks are in `STATUS_BANDS` order, and the header row maps the same array — so
+- **Each status band owns a track**, and `ProjectListRow` renders a badge for every band whether or not
+  its count is nonzero. A band at zero keeps its badge and says `0`, untinted and faded
+  (`.section-header__block--zero`, as on the cards), so no cell is empty and the bands after it cannot
+  slide left out from under their headings. The three tracks are in `STATUS_BANDS` order, and the header row maps the same array — so
   reordering the array means reordering the three tracks in the SCSS with it.
-- **The count inside a badge is padded to three digits** (`.project-list__badge-count`: `min-width: 3ch`,
-  right-aligned, tabular figures), so every badge in a band draws at one width and the labels stop
-  staggering down the column — `1 Ready` is exactly as wide as `129 Ready`. `min-width`, not `width`, so a
-  fourth digit widens the tile instead of colliding with the label. The gap to the label is a **margin on
-  the count, not a space in the markup**: `.section-header__block` is an inline flex container, where a
-  whitespace-only run between two flex items is not rendered at all. In the list the badge also takes
-  `padding-right: 1.5rem` — scoped to `.project-list__badge`, since the section headers want the tighter
-  symmetric padding — so there is trailing room after the label to match the pad before the digits. The
-  three `--list-col-*` widths are sized for that padded badge, **so they move together with it**: widen the
-  padding without widening the tracks and the difference comes out of the label.
+- **A list badge is a number only** — the column heading names the band, and dropping the word is what
+  made room for the Due column. The count is padded to three digits (`.project-list__badge-count`:
+  `min-width: 3ch`, centred, tabular figures), so every badge in a band draws at one width — `1` is exactly
+  as wide as `129`. `min-width`, not `width`, so a fourth digit widens the tile. The band name and count
+  are on the badge's `title`. The three band tracks are sized for their *headings*, the widest thing in
+  each column.
 - **Nothing in the badge cell shrinks** (`.project-list__badge > * { flex: none }`). The cell is a flex
   container, so by default a track a shade too narrow does not overflow visibly — it compresses the badge
   and `white-space: nowrap` cuts the label off inside its own border, which reads as a broken style rather
@@ -269,8 +269,7 @@ Two more consequences worth not undoing:
   a grid item's automatic minimum size is its content, which would otherwise push past the track.
 
 Below `60rem` the row stops being a grid and becomes a wrapping flex row. Aligned columns are the first
-thing to go — the header is hidden there, so there is nothing to align under, and an empty badge slot
-would spend width the row no longer has. `.project-list__badge:empty { display: none }` collapses them.
+thing to go — the header is hidden there, so there is nothing to align under.
 
 Every `onValue` subscription in this codebase returns **`onValue`'s own unsubscribe**, never
 `off(path)` — `off` detaches every listener at that path and so takes down any overlapping
@@ -610,7 +609,7 @@ page.tsx
         │   │                       tool itself. Moved here from the header; removing runs
         │   │                       removeTeamMember + revertAssignmentsForMember
         │   ├── ModeToggle ×1 — All projects / My assignments (underline tabs, brand bar)
-        │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, archived
+        │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, average rating, archived; one row
         │   ├── [sort / owner / status controls, Cards/List ModeToggle, bulk-assign bar]
         │   ├── ProjectCard (per active project, in a responsive grid — "cards" view)
         │   │   ├── ProgressWheel — three hoverable bands, custom SVG
