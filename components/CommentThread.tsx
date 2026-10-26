@@ -12,7 +12,8 @@ interface Props {
   comments?: QuestionComment[];
   /** The signed-in user's TeamMember.id, or undefined before the team bank has said who that is. */
   myMemberId?: string;
-  onAdd: (text: string) => void;
+  /** Rejects when the comment did not reach the server. */
+  onAdd: (text: string) => Promise<void>;
   onSetResolved: (commentId: string, resolved: boolean) => void;
   onDelete: (commentId: string) => void;
 }
@@ -39,11 +40,19 @@ export default function CommentThread({
   const resolved = comments.filter((c) => c.resolved);
   const canComment = myMemberId !== undefined;
 
+  /**
+   * Clear the box straight away, as a posted comment should — RTDB draws the new comment into the thread
+   * at once from its local cache, and offline the write just waits rather than failing. But if the server
+   * refuses it, RTDB takes it back out of the thread, so the text goes back in the box rather than being
+   * lost; in front of anything typed since, so neither is lost.
+   */
   function submit() {
     const text = draft.trim();
     if (!text || !canComment) return;
-    onAdd(text);
     setDraft("");
+    onAdd(text).catch(() => {
+      setDraft((current) => (current.trim() ? `${text}\n\n${current}` : text));
+    });
   }
 
   return (

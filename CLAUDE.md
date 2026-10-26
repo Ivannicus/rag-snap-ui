@@ -415,6 +415,12 @@ sessions/<id>/comments/<encodeKey(item.id)>/<pushId> = {
   is the only source and there is no second version of a thread to reconcile. `applyRemoteState`
   compares threads by value (`JSON.stringify`), because `sameMap` is shallow and every snapshot decodes
   fresh arrays.
+- **Posting clears the box at once, and gives the text back if the server refuses it.** RTDB draws the
+  comment into the thread from its local cache straight away (and offline just waits), so clearing is
+  right — but a rejected write is withdrawn from the thread, and the comment used to vanish with it.
+  `onAdd` returns a promise that rejects, and `CommentThread` restores the text (in front of anything
+  typed since). `handleAddComment` does **not** go through `writeToSession`, whose toast says the change
+  "is still shown here" — the one thing a refused comment is not.
 - **Author details are denormalized** onto each comment, so it still names whoever wrote it after they
   leave the team bank. `revertAssignmentsForMember` does not touch comments.
 - **Open comments block approving.** `QuestionCard`'s `approveBlockedReason` adds them after the
@@ -535,6 +541,16 @@ native undo stack; setting the value from React would wipe it. `renderAnswer` / 
 markers must hug their text, so `5 * 3 * 2` in an AI answer stays literal, and bold's closing `**` may
 not be followed by a third star, so `**bold *italic***` nests rather than closing early.
 
+**No regex lookbehind (`(?<=`, `(?<!`) anywhere in client code.** Safari before 16.4 cannot parse one,
+and a regex literal is compiled as its module loads — so the failure is not an unformatted answer, it is
+the whole app not loading. `INLINE`'s italic used to end in a lookbehind; it now matches the content's
+first and last characters as `[^\s*]` instead, which accepts exactly the same strings.
+
+**A numbered list keeps the numbers written in it**, as the CSV does. Blank lines between items of one
+list do not end it (AI answers space their items out, and each used to become its own list reading
+"1. 1. 1."), and each `<li>` carries its source number as `value`, so a list a paragraph genuinely
+interrupts still carries on at 3.
+
 ### Live presence and the editor lock
 
 **One editor per question.** When someone has a question's editor open, everyone else with that project
@@ -543,13 +559,21 @@ hovering (or tabbing to) an avatar shows the person's full name in a Vanilla `p-
 change that answer**: Edit and Revert are disabled, and a muted `p-icon--lock-locked` line names who
 is in it. The editor sees their own avatar too, first in their
 editor's corner with a "(you)" tooltip, drawn locally from `myPresence` rather than from the snapshot —
-and kept out of `questionEditors`, which is what stops a user's own lock locking them out. There is no live
-text sync: the lock is what stops two drafts of one answer, the second Save silently overwriting the
-first.
+and this tab is kept out of `questionEditors`, which is what stops its own lock locking it out. There is
+no live text sync: the lock is what stops two drafts of one answer, the second Save silently overwriting
+the first.
 
 ```
-presence/<sessionId>/<encodeKey(questionId)>/<memberId> = { name, photoURL, ts: serverTimestamp() }
+presence/<sessionId>/<encodeKey(questionId)>/<tabId> = { memberId, name, photoURL, ts: serverTimestamp() }
 ```
+
+**The lock belongs to a tab, not a person.** Each page load gets its own `thisTabId()`. Keyed by
+`memberId`, one user's second tab or device saw its own entry, took it for its own lock and walked in —
+two drafts of one answer again — and cancelling in either tab deleted the entry the other still needed.
+Now `questionEditors` filters out *this tab* only, so your other tab locks you like anyone else would,
+and the lock line says "You are editing this answer in another tab or window" rather than naming you to
+yourself. Entries from a build that keyed by member have no `memberId` child and are read with the key
+as the member; the two shapes still exclude each other.
 
 All of it is in `lib/presence.ts`. Things worth not undoing:
 
@@ -560,6 +584,11 @@ All of it is in `lib/presence.ts`. Things worth not undoing:
   undeployed `/presence` rule leaves the app as it was rather than refusing every editor.
 - **Presence is the open editor, not focus.** Switching windows mid-draft must not hand the box to
   somebody else, and neither must switching to the dashboard — so publishing is not gated on the view.
+  That depends on `STALE_MS` outliving a *background* tab's heartbeat (below), not a visible one's.
+- **A claim that never opens an editor is given back.** `onClaimEditing` resolves to a release, or null
+  when the lock is someone else's. If the answer was approved or the card unmounted while the claim was
+  in flight, `startEdit` releases it (`claimContext`, a ref read only after the await); otherwise nothing
+  would ever publish over the claim or tear it down, and it would lock everyone out until it went stale.
 - **Each card holds its own lock** through an effect on `editing` in `QuestionCard`
   (`onPublishEditing`, which returns the teardown). An effect rather than the open/close buttons because
   the editor can close with no click — a collaborator's approval, a filter change unmounting the card —
@@ -567,9 +596,14 @@ All of it is in `lib/presence.ts`. Things worth not undoing:
 - **A sibling of `/sessions`, not a child.** `subscribeToSession` listens to the whole room, so a
   heartbeat under it would re-deliver the corpus every 15s, and `ensureSession`'s seed transaction aborts
   on an existing node, so an early presence write would leave a room with no document.
-- **Heartbeat 15s, stale after 35s, swept every 5s** (`HEARTBEAT_MS` / `STALE_MS` / `SWEEP_MS`).
-  `onDisconnect().remove()` releases a closed tab's lock and is re-registered every beat, since a dropped
-  connection spends it. The 35s window covers a dead network, where `onDisconnect` never reaches anyone.
+- **Heartbeat 15s, stale after 90s, swept every 5s** (`HEARTBEAT_MS` / `STALE_MS` / `SWEEP_MS`).
+  **90s is for background tabs:** Chrome runs the timers of a tab hidden for five minutes once a minute,
+  so a draft left open behind another window beats every ~60s. At the old 35s its lock lapsed for part
+  of every minute and anyone could claim the question. A tab also beats the moment it becomes visible
+  again. `onDisconnect().remove()` still releases a closed tab's lock at once and is re-registered every
+  beat, since a dropped connection spends it; the cost of the longer window falls only on a dead network,
+  which now holds its lock for up to 90s. A tab the browser *freezes* (no JavaScript at all) still loses
+  its lock after 90s — not fixable from a timer.
 - **Staleness is judged on server time** (`serverNow()`, via `.info/serverTimeOffset`), because `ts` is a
   server timestamp and client clocks drift.
 - **The live map is state behind `samePresence`**, so heartbeats (which change only `ts`) and sweeps
@@ -851,7 +885,11 @@ Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel
 **Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
 access to the `canonical-req-8605` Firebase project.
 
-Three nodes are new and all fail closed until that deploy lands:
+All three of the nodes below are deployed as of 2026-10-26 (`/presence` last). What each did while its
+rule was missing is kept because it is what a missing rule looks like, should one ever be dropped — and
+`/presence` is the one to suspect first, since its failure is silent: the lock simply never engaged,
+and that is how it went unnoticed. To compare the live rules with `database.rules.json`, read
+`<databaseURL>/.settings/rules.json` with the CLI's access token.
 
 - `/savedFileData` — **deploy before shipping this build.** Documents live here, so without the rule
   every upload is rejected outright (the multi-path write is atomic, so nothing is half-saved and the

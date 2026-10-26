@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ModeToggle from "./ModeToggle";
 import TeamMemberAvatar from "./TeamMemberAvatar";
 import AnswerEditor from "./AnswerEditor";
 import CommentThread from "./CommentThread";
 import { isUnanswered, questionState } from "@/lib/utils";
-import type { PresenceUser } from "@/lib/presence";
+import { thisTabId, type PresenceEditor, type PresenceUser } from "@/lib/presence";
 import type { QAItem, QuestionComment } from "@/lib/types";
 
 /** Which of the two answers the card's single box is showing. */
@@ -39,10 +39,11 @@ interface Props {
   open: boolean;
   onSetOpen: (id: string, open: boolean) => void;
   /**
-   * The other people with this question's editor open right now, never including the signed-in user.
-   * While there is anyone here, every writer of this answer on this card is locked.
+   * Every other tab with this question's editor open right now — other people, and this same user in
+   * another tab or on another device. Never this tab. While there is anyone here, every writer of this
+   * answer on this card is locked.
    */
-  editors?: PresenceUser[];
+  editors?: PresenceEditor[];
   /**
    * The signed-in user, shown first in the corner of their own open editor and labelled "(you)". Kept
    * apart from `editors` because it must never lock this user out of their own box.
@@ -50,11 +51,15 @@ interface Props {
   myPresence?: PresenceUser;
   /** This question's comment thread, oldest first. Missing means nobody has commented. */
   comments?: QuestionComment[];
-  onAddComment: (id: string, text: string) => void;
+  /** Rejects when the comment did not reach the server, so the thread can give its text back. */
+  onAddComment: (id: string, text: string) => Promise<void>;
   onSetCommentResolved: (id: string, commentId: string, resolved: boolean) => void;
   onDeleteComment: (id: string, commentId: string) => void;
-  /** Take the lock on this question's editor; resolves false when somebody else got there first. */
-  onClaimEditing: (id: string) => Promise<boolean>;
+  /**
+   * Take the lock on this question's editor. Resolves to a release for a claim the card ends up not
+   * using, or null when another tab got there first.
+   */
+  onClaimEditing: (id: string) => Promise<(() => void) | null>;
   /** Hold the lock for as long as the editor is open; the returned teardown releases it. */
   onPublishEditing: (id: string) => () => void;
 }
@@ -75,8 +80,13 @@ function highlight(text: string, term: string): React.ReactNode {
  * their text (`*word*`, not `5 * 3 * 2`), so arithmetic and stray asterisks in an AI answer stay literal.
  * Bold's closing `**` may not be followed by a third star: italic ending inside a bold run writes
  * `**bold *italic***`, and without that the bold would close one star early and strand the italic.
+ *
+ * **No lookbehind.** Italic used to end in `(?<=[^\s*])`, and Safari before 16.4 cannot parse a
+ * lookbehind at all — a regex literal is compiled as the module loads, so it was not answers that failed
+ * there but the whole app. The same rule is spelled forwards instead: the content's first and last
+ * characters are each matched as `[^\s*]`, with the optional middle between them.
  */
-const INLINE = /\*\*(.+?)\*\*(?!\*)|<u>(.+?)<\/u>|\*(?=[^\s*])(.+?)(?<=[^\s*])\*/;
+const INLINE = /\*\*(.+?)\*\*(?!\*)|<u>(.+?)<\/u>|\*([^\s*](?:.*?[^\s*])?)\*/;
 
 function renderInline(text: string, searchTerm: string, keyPrefix = ""): React.ReactNode[] {
   const out: React.ReactNode[] = [];
@@ -105,12 +115,17 @@ function renderInline(text: string, searchTerm: string, keyPrefix = ""): React.R
 }
 
 const BULLET_LINE = /^[-*]\s+/;
-const NUMBER_LINE = /^\d+[.)]\s+/;
+const NUMBER_LINE = /^(\d+)[.)]\s+/;
 
 /**
  * Render a markdown-ish answer with optional search highlighting: the inline formats above, `- ` / `* `
  * bullets, `1. ` numbered items, and line breaks. Consecutive list lines become one real `<ul>` / `<ol>`
  * — the bullets used to be bare `<li>`s with no list around them.
+ *
+ * Two things keep a numbered list's numbers the ones in the text, as the CSV has them. Blank lines
+ * between items of one list do not end it — AI answers often space their items out, and each item used
+ * to become a list of its own. And every item carries its written number as `value`, so a list that is
+ * genuinely interrupted by a paragraph still carries on at 3 rather than restarting at 1.
  */
 function renderAnswer(text: string, searchTerm: string): React.ReactNode {
   const blocks: React.ReactNode[] = [];
@@ -121,9 +136,25 @@ function renderAnswer(text: string, searchTerm: string): React.ReactNode {
     if (kind) {
       const prefix = kind === "ul" ? BULLET_LINE : NUMBER_LINE;
       const items: React.ReactNode[] = [];
-      while (i < lines.length && prefix.test(lines[i])) {
-        items.push(<li key={i}>{renderInline(lines[i].replace(prefix, ""), searchTerm)}</li>);
-        i++;
+      while (i < lines.length) {
+        const match = prefix.exec(lines[i]);
+        if (match) {
+          items.push(
+            <li key={i} value={kind === "ol" ? Number(match[1]) : undefined}>
+              {renderInline(lines[i].slice(match[0].length), searchTerm)}
+            </li>
+          );
+          i++;
+          continue;
+        }
+        // Blank lines followed by another item of the same list are spacing inside it, not its end.
+        let next = i;
+        while (next < lines.length && !lines[next].trim()) next++;
+        if (next > i && next < lines.length && prefix.test(lines[next])) {
+          i = next;
+          continue;
+        }
+        break;
       }
       const List = kind;
       blocks.push(<List key={`list-${i}`} className="answer-list">{items}</List>);
@@ -154,19 +185,25 @@ function PresenceBadges({
   meId,
   corner,
 }: {
-  editors: PresenceUser[];
+  editors: PresenceEditor[];
   /** Whose avatar is the signed-in user's own, so its tooltip can say so. */
   meId?: string;
   corner: "left" | "right";
 }) {
+  const tab = thisTabId();
   return (
     <span className={`question-card__presence question-card__presence--${corner} member-stack`}>
       {editors.map((editor) => {
         const label =
-          editor.memberId === meId ? `${editor.name} (you)` : `${editor.name} is editing`;
+          editor.tabId === tab
+            ? `${editor.name} (you)`
+            : editor.memberId === meId
+              ? `${editor.name} (you, in another tab)`
+              : `${editor.name} is editing`;
         return (
           <span
-            key={editor.memberId}
+            // By tab: one person can hold two entries, from two tabs.
+            key={editor.tabId}
             // Focusable so the name is reachable from the keyboard as well; Vanilla shows the message on
             // `:focus` as well as `:hover`.
             tabIndex={0}
@@ -333,7 +370,8 @@ export default function QuestionCard({
       : undefined);
   // Who the open editor's corner shows: me first, then anyone who got in alongside me (only a lost race
   // can produce one). The card is outlined whenever anyone at all — me included — has the editor open.
-  const editorBadges = editing && myPresence ? [myPresence, ...(editors ?? [])] : editors ?? [];
+  const editorBadges: PresenceEditor[] =
+    editing && myPresence ? [{ ...myPresence, tabId: thisTabId() }, ...(editors ?? [])] : editors ?? [];
   const outlined = busy || (editing && myPresence !== undefined);
 
   /**
@@ -343,11 +381,15 @@ export default function QuestionCard({
    * not in `editors`, and a lost race that let both in still lets both finish.
    */
   const lockedBy = !editing && busy ? editors : undefined;
-  const lockReason = lockedBy
-    ? `${lockedBy.map((editor) => editor.name).join(" and ")} ${
-        lockedBy.length === 1 ? "is" : "are"
-      } editing this answer. You can edit it once they’re done.`
-    : undefined;
+  // My own other tab locks this one like anyone else, but naming me to myself would read as a bug.
+  const lockedByOthers = lockedBy?.filter((editor) => editor.memberId !== myPresence?.memberId) ?? [];
+  const lockReason = !lockedBy
+    ? undefined
+    : lockedByOthers.length === 0
+      ? "You are editing this answer in another tab or window. Save or cancel there to edit it here."
+      : `${lockedByOthers.map((editor) => editor.name).join(" and ")} ${
+          lockedByOthers.length === 1 ? "is" : "are"
+        } editing this answer. You can edit it once they’re done.`;
   const confirmingRevert = revertRequested && !approved && !lockedBy;
 
   /**
@@ -379,6 +421,23 @@ export default function QuestionCard({
     return onPublishEditing(item.id);
   }, [editing, item.id, onPublishEditing]);
 
+  /**
+   * What `startEdit` needs to know once its claim comes back, which is not what it knew when it was
+   * clicked: the card may have gone (a filter change, a doc switch) or the answer been approved meanwhile.
+   * Read only after the await, and written in an effect, never during render.
+   */
+  const claimContext = useRef({ mounted: false, blocked: false });
+  useEffect(() => {
+    claimContext.current.blocked = approved || viewingOriginal;
+  }, [approved, viewingOriginal]);
+  useEffect(() => {
+    const context = claimContext.current;
+    context.mounted = true;
+    return () => {
+      context.mounted = false;
+    };
+  }, []);
+
   function setEditing(next: boolean) {
     setEditingRequested(next);
   }
@@ -390,11 +449,18 @@ export default function QuestionCard({
   async function startEdit() {
     if (approved || viewingOriginal || editBlockedReason || claiming) return;
     setClaiming(true);
-    const claimed = await onClaimEditing(item.id);
+    const release = await onClaimEditing(item.id);
     setClaiming(false);
     // Lost the race: somebody else's claim committed first. Their presence is already on its way, and
     // when it lands this card shows the lock line naming them, so there is nothing more to say here.
-    if (!claimed) return;
+    if (!release) return;
+    // Won it, but there is no longer an editor to open. Nothing would ever publish over this claim or
+    // tear it down, so give it back now rather than locking everyone else out until it goes stale.
+    const { mounted, blocked } = claimContext.current;
+    if (!mounted || blocked) {
+      release();
+      return;
+    }
     setDraft(editedAnswer ?? item.answer);
     setEditing(true);
     onSetOpen(item.id, true);
@@ -624,7 +690,7 @@ export default function QuestionCard({
                 }`}
               >
                 {renderAnswer(item.answer, searchTerm)}
-                {busy && <PresenceBadges editors={editors} corner="left" />}
+                {busy && <PresenceBadges editors={editors} meId={myPresence?.memberId} corner="left" />}
                 <div className="question-card__answer-actions">
                   <CopyButton text={item.answer} />
                   {!hasEdit && !approved && editButton}
@@ -633,7 +699,7 @@ export default function QuestionCard({
             ) : (
               <div className="question-card__answer question-card__answer--edited">
                 {renderAnswer(editedAnswer!, searchTerm)}
-                {busy && <PresenceBadges editors={editors} corner="left" />}
+                {busy && <PresenceBadges editors={editors} meId={myPresence?.memberId} corner="left" />}
                 {/* Copy survives approval; the two writers do not — an approved answer is frozen
                     until the approval is withdrawn. */}
                 <div className="question-card__answer-actions">

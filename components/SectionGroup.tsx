@@ -3,7 +3,7 @@
 import QuestionCard from "./QuestionCard";
 import TeamMemberSelect from "./TeamMemberSelect";
 import { questionState } from "@/lib/utils";
-import type { PresenceUser } from "@/lib/presence";
+import type { PresenceEditor, PresenceUser } from "@/lib/presence";
 import type { ItemStatus, QAItem, QuestionComment, SectionInfo, TeamMember } from "@/lib/types";
 
 interface Props {
@@ -57,16 +57,16 @@ interface Props {
    */
   assignableMembers: TeamMember[];
   /** item.id → the *other* people who have that question's editor open. */
-  questionEditors: Record<string, PresenceUser[]>;
+  questionEditors: Record<string, PresenceEditor[]>;
   /** The signed-in user as a presence entry, for their own avatar on their own open editor. */
   myPresence?: PresenceUser;
   /** item.id -> that question's comment thread, oldest first. */
   comments: Record<string, QuestionComment[]>;
-  onAddComment: (id: string, text: string) => void;
+  onAddComment: (id: string, text: string) => Promise<void>;
   onSetCommentResolved: (id: string, commentId: string, resolved: boolean) => void;
   onDeleteComment: (id: string, commentId: string) => void;
   /** Take the lock on a question's editor; resolves false when somebody else holds it. */
-  onClaimEditing: (id: string) => Promise<boolean>;
+  onClaimEditing: (id: string) => Promise<(() => void) | null>;
   /** Hold the lock while an editor is open; the returned teardown releases it. */
   onPublishEditing: (id: string) => () => void;
 }

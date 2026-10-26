@@ -41,10 +41,13 @@ import {
   claimEditing,
   livePresence,
   publishPresence,
+  releaseEditing,
   samePresence,
   serverNow,
   subscribeToPresence,
   SWEEP_MS,
+  thisTabId,
+  type PresenceEditor,
   type PresenceMap,
   type PresenceSnapshot,
   type PresenceUser,
@@ -534,10 +537,16 @@ export default function AppShell({
 
   // Take the lock before the editor opens. With no doc, or before the team bank has said who "me" is,
   // there is nothing to claim against and editing is let through, as it was before there was a lock.
+  //
+  // Resolves to the claim's release, or null when somebody else holds the lock. The card calls the
+  // release only when it ends up not opening the editor after all; once it does open, the published
+  // presence owns the same entry and its teardown removes it.
   const handleClaimEditing = useCallback(
-    (id: string): Promise<boolean> => {
-      if (!docId || !meId || !meName) return Promise.resolve(true);
-      return claimEditing(docId, id, { memberId: meId, name: meName, photoURL: mePhoto });
+    (id: string): Promise<(() => void) | null> => {
+      if (!docId || !meId || !meName) return Promise.resolve(() => {});
+      return claimEditing(docId, id, { memberId: meId, name: meName, photoURL: mePhoto }).then(
+        (claimed) => (claimed ? () => releaseEditing(docId, id) : null)
+      );
     },
     [docId, meId, meName, mePhoto]
   );
@@ -598,18 +607,21 @@ export default function AppShell({
     return () => clearInterval(interval);
   }, [presenceShown, refreshPresence]);
 
-  // What the cards draw for other people: everyone but me. My own avatar on my own open editor is drawn
-  // from `myPresence` below instead — straight away, without waiting on the round trip — and labelled
-  // as me, so it cannot be read as somebody else being in the box. Keeping me out of this map is also
-  // what keeps my own lock from locking me out.
+  // What the cards draw for other tabs: every editor but this tab. My own avatar on this tab's open
+  // editor is drawn from `myPresence` below instead — straight away, without waiting on the round trip —
+  // and labelled as me. Keeping this tab out of the map is what keeps its own lock from locking it out.
+  //
+  // This *tab*, not this person: my own second tab stays in the map, so it locks this one exactly as a
+  // colleague would. Filtering on `memberId` is what let one user's two tabs both into the same answer.
   const questionEditors = useMemo(() => {
-    const out: Record<string, PresenceUser[]> = {};
+    const tab = thisTabId();
+    const out: Record<string, PresenceEditor[]> = {};
     for (const [questionId, editors] of Object.entries(docPresence ?? {})) {
-      const others = editors.filter((editor) => editor.memberId !== meId);
+      const others = editors.filter((editor) => editor.tabId !== tab);
       if (others.length) out[questionId] = others;
     }
     return out;
-  }, [docPresence, meId]);
+  }, [docPresence]);
 
   const myPresence = useMemo<PresenceUser | undefined>(
     () => (meId && meName ? { memberId: meId, name: meName, photoURL: mePhoto } : undefined),
@@ -910,12 +922,25 @@ export default function AppShell({
 
   // Comments. The author is `myPresence`, the signed-in user's team-bank entry; with no entry yet there is
   // nobody to attribute a comment to, and the card disables its form until there is.
+  //
+  // Posting does not go through `writeToSession`: its toast says the change "is still shown here", which
+  // is the one thing a failed comment is not — RTDB withdraws the rejected write from the thread. Instead
+  // the promise rejects, and `CommentThread` puts the text back in the box it was cleared from.
   const handleAddComment = useCallback(
-    (id: string, text: string) => {
-      if (!myPresence) return;
-      writeToSession((sid) => addComment(sid, id, myPresence, text));
+    (id: string, text: string): Promise<void> => {
+      const posted =
+        docId && myPresence
+          ? addComment(docId, id, myPresence, text)
+          : Promise.reject(new Error("No session to post the comment to"));
+      return posted.catch((err) => {
+        showError(
+          "Comment not posted",
+          "It did not reach the server, so it has been put back in the comment box. Check your connection, then post it again."
+        );
+        throw err;
+      });
     },
-    [writeToSession, myPresence]
+    [docId, myPresence, showError]
   );
 
   const handleSetCommentResolved = useCallback(
