@@ -349,6 +349,19 @@ export default function QuestionCard({
    * collaborator's approval did.
    */
   const editing = editingRequested && !approved && !viewingOriginal;
+
+  /**
+   * ...and once approval has closed the editor, it stays closed. Deriving `editing` alone left
+   * `editingRequested` set underneath the approval, so withdrawing it reopened the editor with the old
+   * draft — and published presence for it without ever claiming the lock, which then held everyone else
+   * out for as long as that tab stayed open. Dropping the request discards the draft, as approval always
+   * has. The revert dialog is dropped for the same reason. Set during render rather than in an effect, so
+   * no render ever has an approved answer and a live request at once.
+   */
+  if (approved && (editingRequested || revertRequested)) {
+    setEditingRequested(false);
+    setRevertRequested(false);
+  }
   /** The box is showing the AI's answer: before the first edit, or on the toggle's AI Answer side. */
   const showRating = !editing && (!hasEdit || viewingOriginal);
 
@@ -363,11 +376,21 @@ export default function QuestionCard({
    * Only *approving* waits on comments. An answer already approved when a comment arrives stays approved
    * — withdrawing it is a deliberate, confirmed act, never a side effect — and Withdraw is not gated.
    */
+  //
+  // Nor while the answer is mid-edit, by anyone: approving would close that editor and throw its draft
+  // away, and sign-off belongs on the text that is actually going to stand. The reset above still covers
+  // the race where an approval lands before the editor's presence has reached the approver.
   const approveBlockedReason =
     approveDisabledReason ??
-    (openComments > 0
-      ? `Resolve ${openComments === 1 ? "the open comment" : `all ${openComments} open comments`} to approve.`
-      : undefined);
+    (editing
+      ? "Save or cancel your edit to approve."
+      : busy
+        ? editors!.every((editor) => editor.memberId === myPresence?.memberId)
+          ? "Save or cancel your edit in the other tab to approve."
+          : "Someone is editing this answer. Approve once they’re done."
+        : openComments > 0
+          ? `Resolve ${openComments === 1 ? "the open comment" : `all ${openComments} open comments`} to approve.`
+          : undefined);
   // Who the open editor's corner shows: me first, then anyone who got in alongside me (only a lost race
   // can produce one). The card is outlined whenever anyone at all — me included — has the editor open.
   const editorBadges: PresenceEditor[] =

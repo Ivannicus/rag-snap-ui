@@ -31,6 +31,14 @@
   @include vanilla-framework.vf-icon-comments(vanilla-framework.$colors--dark-theme--icon);
 }
 
+// The padlock on a question card's lock lines (approved, being edited, AI answer read-only). Same story
+// again: not compiled by `vanilla`, so all three lines drew an empty box, and single-image dark variant.
+@include vanilla-framework.vf-p-icon-lock-locked;
+
+.is-dark .p-icon--lock-locked {
+  @include vanilla-framework.vf-icon-lock-locked(vanilla-framework.$colors--dark-theme--icon);
+}
+
 // How wide a project's name may draw before it ellipses, wherever it shares a line with other controls.
 //
 // One value rather than one per component, because the three places that render a name on a shared line

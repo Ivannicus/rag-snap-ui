@@ -370,11 +370,16 @@ exactly that.
 `approved` is true — the Edit button and Revert to original — and a muted
 `p-icon--lock-locked` line stands below the answer, pointing at Withdraw approval as the way
 back. Sign-off is on the exact text that was signed off on; letting the text change underneath would
-leave an approval standing over words the reviewer never read. Approval also arrives over the live
-session, so `QuestionCard` has an effect that closes an open editor (and any revert dialog) when
-`approved` flips true: refusing to *open* the editor is not enough when someone else can approve
-mid-edit. **A draft in progress is discarded** in that case; the alternative is a Save button that
-writes over an approved answer. Copy is untouched, and so are **ratings** — a rating is an opinion about
+leave an approval standing over words the reviewer never read.
+
+**A question cannot be approved mid-edit.** Approve is disabled while this tab has the editor open
+(`editing`) or anyone else does (`busy`, from presence), with the reason in `approveBlockedReason`. That
+still leaves a race — an approval landing before the editor's presence reached the approver — so when
+`approved` flips true, `QuestionCard` also resets `editingRequested` and `revertRequested` during render.
+**That reset is load-bearing**: `editing` is derived, so without it the request survived underneath the
+approval, and withdrawing the approval reopened the editor with its old draft and republished presence
+without ever claiming the lock. In the race, **the draft is discarded**; the alternative is a Save button
+that writes over an approved answer. Copy is untouched, and so are **ratings** — a rating is an opinion about
 an answer, not a change to it, and the two have always been independent (see the state table above).
 
 The signed-in user's `TeamMember.id` comes from the `me` memo in `AppShell`, which matches `userEmail`
@@ -428,7 +433,7 @@ sessions/<id>/comments/<encodeKey(item.id)>/<pushId> = {
   *approving* waits: an answer already approved when a comment arrives stays approved, and Withdraw is not
   gated. Otherwise comments are independent of approval and of the editor lock.
   Like the other gates, author-only delete is a UI restriction; RTDB rules do not enforce it.
-- `p-icon--comments` is not in Vanilla's core set; `globals.scss` opts it in through its mixin, with the
+- `p-icon--comments` and `p-icon--lock-locked` are not in Vanilla's core set; `globals.scss` opts each in through its mixin, with the
   same `.is-dark` restatement as `p-icon--switcher-dashboard`.
 
 ### Context URLs are read-only
@@ -610,8 +615,8 @@ All of it is in `lib/presence.ts`. Things worth not undoing:
   re-render nothing unless someone arrived or left. Nothing in the inspector tree is memoized.
 - **Tooltips open down and inward** (`p-tooltip` from the answer box's top-left corner,
   `p-tooltip--btm-right` from the editor's top-right) because `.question-card` and its body clip overflow.
-- **Approval is not locked.** Approving still closes an open editor and discards its draft, as it always
-  has — see "Who may approve".
+- **The lock blocks approval too.** A question with a live editor cannot be approved; only a lost race
+  can still close an editor by approval, and then its draft is discarded — see "Who may approve".
 - Like the approval gate, this is a UI restriction; RTDB rules do not enforce it.
 
 ### Team bank
