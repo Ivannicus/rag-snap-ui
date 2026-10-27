@@ -1,5 +1,6 @@
 "use client";
 
+import ModeToggle from "./ModeToggle";
 import type { Filters, FilterStatus, PersonFilterOption, SectionInfo } from "@/lib/types";
 
 interface Props {
@@ -13,7 +14,7 @@ interface Props {
 
 // "Approved" means human-approved, not "the model produced an answer". Questions that have an answer
 // nobody has signed off on yet are only reachable through "All".
-const STATUS_OPTIONS: { value: FilterStatus; label: string }[] = [
+const STATUS_OPTIONS: readonly { value: FilterStatus; label: string }[] = [
   { value: "all", label: "All" },
   { value: "approved", label: "Approved" },
   { value: "unanswered", label: "Unanswered" },
@@ -57,29 +58,17 @@ export default function FilterBar({
     <div className="filter-bar-wrapper">
       <div className="filter-bar">
 
-        {/* Status toggle buttons */}
-        <div className="p-segmented-control filter-bar__status">
-          <div className="p-segmented-control__list">
-            {STATUS_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => setStatus(value)}
-                aria-pressed={filters.status === value}
-                className={`p-segmented-control__button u-no-margin--bottom ${
-                  filters.status === value
-                    ? value === "unanswered"
-                      ? "p-button--negative"
-                      : value === "approved"
-                      ? "p-button--positive"
-                      : "p-button--brand"
-                    : "p-button--base"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Status filter, as underline tabs like every other toggle in the app. The active bar takes
+            the status's own colour — orange for All, green for Approved, red for Unanswered, the
+            colours the segmented buttons used to fill with — through the `--<status>` modifier, which
+            sets `--underline-tabs-bar` for whichever tab is selected. */}
+        <ModeToggle
+          ariaLabel="Filter questions by status"
+          options={STATUS_OPTIONS}
+          value={filters.status}
+          onChange={setStatus}
+          className={`filter-bar__status filter-bar__status--${filters.status}`}
+        />
 
         {/* Section dropdown */}
         <select

@@ -85,6 +85,8 @@ library:
   per-key merge patch — each id written as `true` or an explicit `null` — so two views changing
   different owners at once say nothing about each other's keys. **Do not patch local state on that
   write**: owners are a subscribed map, so the echo updates the screen (see `writeToSession`)
+- `comments: Record<string, QuestionComment[]>` — `item.id → thread`, oldest first; **snapshot-only**, no
+  optimistic copy (see Comments below)
 - `teamMembers: TeamMember[]` — the global team bank (not part of `SessionState`)
 - `filters: Filters` — read through `effectiveFilters`, which drops a person filter whose option has
   gone rather than showing an empty list. `OverviewView` does the same with `effectiveOwnerFilter`
@@ -109,8 +111,8 @@ The dashboard holds its own state in `components/OverviewView.tsx` rather than i
 
 - **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com`, enforced
   in `signInWithGoogle`.
-- **RTDB**: five top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
-  `/archivedProjects` (plus `/rfpDatabase` for the unrelated RFP search view).
+- **RTDB**: six top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
+  `/archivedProjects`, `/presence` (plus `/rfpDatabase` for the unrelated RFP search view).
 
 **A project's session id is its saved-file id.** `sessions/<id>` and `savedFiles/<id>` share a key, so
 opening the same project always joins the same room instead of minting a new one. `ensureSession` seeds
@@ -277,6 +279,29 @@ Every `onValue` subscription in this codebase returns **`onValue`'s own unsubscr
 subscription. This bit `subscribeToSession`, `subscribeToSavedFiles` and `subscribeToTeamMembers` in
 turn; do not reintroduce it.
 
+### The section header is a grid of fixed slots
+
+`SectionGroup`'s header is a CSS grid in which **every box owns a fixed-width track** — assignee,
+reviewer, questions, approved, ready, unanswered, toggle — and the title is the only elastic one
+(`minmax(0, 1fr)`, ellipsed, full label on hover). It used to be a wrapping flex row, which sized each box
+to its content, so a long name or an extra badge pushed the toggle onto another line and moved it from one
+section to the next. The widths are `--section-col-*` custom properties on `.section-header`; the same
+reasoning as `.project-list__row` applies, including **no `auto` track**.
+
+- **All three bands always render**, in `STATUS_BANDS` order. A band at zero keeps its box and says `0`,
+  but drops its tint and fades (`.section-header__block--zero`), so a slot is never empty and the boxes
+  after it never slide. The count is padded to three digits through the shared
+  `.project-list__badge-count, .section-header__count` rule — narrowed to two digits in the header, since
+  a section holds at most 14 questions — and the slot sets `gap: 0` (the approved tint
+  carries a gap for its ✓ on question cards), so every label starts at the same x.
+- **No Edited badge on the header.** Edits show on each question card; do not add a fourth count back.
+- **The count boxes are sized to their content**, not padded out, so the title gets the room.
+- **Three layouts by container query** on `.section-group`: one row above 70rem, two rows (title and
+  toggle, then the six boxes) above 61rem, a wrapping row below. The fixed tracks plus gaps come to
+  60.625rem, so **the breakpoints move with the widths**. The inspector's `<main>` is `app-main--wide`
+  (80rem, the dashboard's width) so the one-row layout is reachable beside the 14rem sidebar.
+- The assignee/reviewer names fill their slot and ellipse; the trigger's `title` carries the full name.
+
 ### Key data model: three item states
 
 Item ids are producer-supplied strings and carry no guaranteed shape — **do not split one on `.` to
@@ -315,9 +340,17 @@ A human filling a blank makes it `ready`, not `unanswered` — that is why the d
 
 Unanswered items still have rating disabled (greyed stars).
 
+**A rating is of the AI's answer**, so the rating row sits above Approve and is shown only while the box
+shows the AI answer — always before the first edit, then only on the toggle's AI Answer side, and never
+while the editor is open (`showRating` in `QuestionCard`). **Edit is disabled until the AI answer is
+rated** (`needsRating` → `editBlockedReason`, after the editor lock's reason): every edit starts from a
+judgement of what the AI produced. Any rating counts — there is one per question, not per person — and an
+unanswered AI answer is exempt, since there is nothing to rate and a blank must still be fillable.
+
 ### Who may approve
 
-**Approving a question is the section reviewer's alone.** `SectionGroup` computes one
+**Approving a question is the section reviewer's alone** — and only once its comments are resolved (see
+Comments). `SectionGroup` computes one
 `approveDisabledReason` for the whole section — the reviewer is a property of the section, not of a
 question, so every card in it gets the same answer — and `QuestionCard` disables Approve and shows that
 string as both the hint text and the tooltip. Two cases block it:
@@ -334,14 +367,19 @@ sign-off that may not be the clicker's, and only the reviewer can put it back �
 exactly that.
 
 **An approved answer is frozen.** Every writer of `editedAnswers` on the card is withdrawn while
-`approved` is true — the Edit response link, Edit again, and Revert to original — and a muted
-`p-icon--lock-locked` line stands where the Edit control was, pointing at Withdraw approval as the way
+`approved` is true — the Edit button and Revert to original — and a muted
+`p-icon--lock-locked` line stands below the answer, pointing at Withdraw approval as the way
 back. Sign-off is on the exact text that was signed off on; letting the text change underneath would
-leave an approval standing over words the reviewer never read. Approval also arrives over the live
-session, so `QuestionCard` has an effect that closes an open editor (and any revert dialog) when
-`approved` flips true: refusing to *open* the editor is not enough when someone else can approve
-mid-edit. **A draft in progress is discarded** in that case; the alternative is a Save button that
-writes over an approved answer. Copy is untouched, and so are **ratings** — a rating is an opinion about
+leave an approval standing over words the reviewer never read.
+
+**A question cannot be approved mid-edit.** Approve is disabled while this tab has the editor open
+(`editing`) or anyone else does (`busy`, from presence), with the reason in `approveBlockedReason`. That
+still leaves a race — an approval landing before the editor's presence reached the approver — so when
+`approved` flips true, `QuestionCard` also resets `editingRequested` and `revertRequested` during render.
+**That reset is load-bearing**: `editing` is derived, so without it the request survived underneath the
+approval, and withdrawing the approval reopened the editor with its old draft and republished presence
+without ever claiming the lock. In the race, **the draft is discarded**; the alternative is a Save button
+that writes over an approved answer. Copy is untouched, and so are **ratings** — a rating is an opinion about
 an answer, not a change to it, and the two have always been independent (see the state table above).
 
 The signed-in user's `TeamMember.id` comes from the `me` memo in `AppShell`, which matches `userEmail`
@@ -354,6 +392,49 @@ snapshot lands, so cards start disabled and enable a moment later rather than th
 check: it would have to derive the section key from the item id, and RTDB rules have no string split.
 Enforcing it in the database would mean re-keying `itemStatus` as `<section>/<item>` so a rule could
 reach `sectionReviewers/$section` — a data migration, not a rules edit.
+
+### Comments
+
+Every question has a comment thread, under its Approve row (`components/CommentThread.tsx`), for
+critiques to address and for a reviewer to say why they will not approve. **Anyone signed in can comment,
+resolve and reopen; only a comment's author can delete it.** Open comments list first, oldest first;
+resolved ones drop to the bottom, fade, and say who resolved them. A card with open comments carries a
+solid-orange `N Unresolved` tag in its header (`.section-header__block--comments`) — orange because no
+status uses it, solid because a tint of it read as Unanswered's pink.
+
+```
+sessions/<id>/comments/<encodeKey(item.id)>/<pushId> = {
+  authorId, authorName, authorPhoto, text, createdAt,
+  resolvedAt?, resolvedById?, resolvedByName?          // present only while resolved
+}
+```
+
+- **Inside the room**, unlike `/presence`: comments change only when someone acts, so riding
+  `subscribeToSession` costs nothing, and the existing `sessions/$sessionId` rule covers them — **nothing
+  to deploy**. `decodeComments` in `lib/session.ts` turns the node into sorted threads and skips entries
+  too partial to draw.
+- **Writers** are `addComment`, `setCommentResolved` and `deleteComment` in `lib/session.ts`.
+  `setCommentResolved` is a **transaction that aborts on a missing node**, not an `update`: resolving a
+  comment its author just deleted would otherwise write back a ghost holding only the resolution fields.
+- **No optimistic copy in `AppShell`.** RTDB applies a local write to its cache at once, so the snapshot
+  is the only source and there is no second version of a thread to reconcile. `applyRemoteState`
+  compares threads by value (`JSON.stringify`), because `sameMap` is shallow and every snapshot decodes
+  fresh arrays.
+- **Posting clears the box at once, and gives the text back if the server refuses it.** RTDB draws the
+  comment into the thread from its local cache straight away (and offline just waits), so clearing is
+  right — but a rejected write is withdrawn from the thread, and the comment used to vanish with it.
+  `onAdd` returns a promise that rejects, and `CommentThread` restores the text (in front of anything
+  typed since). `handleAddComment` does **not** go through `writeToSession`, whose toast says the change
+  "is still shown here" — the one thing a refused comment is not.
+- **Author details are denormalized** onto each comment, so it still names whoever wrote it after they
+  leave the team bank. `revertAssignmentsForMember` does not touch comments.
+- **Open comments block approving.** `QuestionCard`'s `approveBlockedReason` adds them after the
+  section's own reviewer gate, so the reviewer sees "Resolve the open comment to approve." Only
+  *approving* waits: an answer already approved when a comment arrives stays approved, and Withdraw is not
+  gated. Otherwise comments are independent of approval and of the editor lock.
+  Like the other gates, author-only delete is a UI restriction; RTDB rules do not enforce it.
+- `p-icon--comments` and `p-icon--lock-locked` are not in Vanilla's core set; `globals.scss` opts each in through its mixin, with the
+  same `.is-dark` restatement as `p-icon--switcher-dashboard`.
 
 ### Context URLs are read-only
 
@@ -443,6 +524,100 @@ nothing. Adding it is a one-line change to `OVERLAY_KEYS` if the dashboard ever 
 with a member's outstanding and approved *questions*; counting the questions inside their sections
 instead would need a per-section item count, which is not denormalized into `savedFiles` metadata — and
 loading a document to work it out is what the bandwidth rule above forbids.
+
+### The answer editor and answer formatting
+
+**There is one Edit button**, beside Copy in the top-right of whichever answer box is editable: the AI
+answer before the first edit, the Edited Answer after it (the AI side is read-only once an edit exists).
+It is the `editButton` element in `QuestionCard`, shared by both boxes. It replaced a blue "Edit
+response" link under unedited answers and an "Edit again" button on edited ones — do not bring back a
+second control for the same action.
+
+`components/AnswerEditor.tsx` is the edit box: a formatting toolbar (Bold, Italic, Underline, bulleted
+and numbered lists; Ctrl/⌘+B/I/U) over a textarea that **grows to fit its text** (`fit`, re-run on every
+change and on a width change). Formatting is **plain markdown stored in the answer string** —
+`**bold**`, `*italic*`, `- ` and `1. ` lines — with `<u>…</u>` for underline, which markdown has no
+syntax for. No rich-text model: `editedAnswers` stays a string, so export, `isUnanswered` and the live
+session are untouched, and the CSV carries the markers verbatim.
+
+The toolbar edits through `document.execCommand("insertText")` so every click lands on the textarea's
+native undo stack; setting the value from React would wipe it. `renderAnswer` / `renderInline` in
+`QuestionCard` draw the same syntax, grouping consecutive list lines into real `<ul>`/`<ol>`. Italic's
+markers must hug their text, so `5 * 3 * 2` in an AI answer stays literal, and bold's closing `**` may
+not be followed by a third star, so `**bold *italic***` nests rather than closing early.
+
+**No regex lookbehind (`(?<=`, `(?<!`) anywhere in client code.** Safari before 16.4 cannot parse one,
+and a regex literal is compiled as its module loads — so the failure is not an unformatted answer, it is
+the whole app not loading. `INLINE`'s italic used to end in a lookbehind; it now matches the content's
+first and last characters as `[^\s*]` instead, which accepts exactly the same strings.
+
+**A numbered list keeps the numbers written in it**, as the CSV does. Blank lines between items of one
+list do not end it (AI answers space their items out, and each used to become its own list reading
+"1. 1. 1."), and each `<li>` carries its source number as `value`, so a list a paragraph genuinely
+interrupts still carries on at 3.
+
+### Live presence and the editor lock
+
+**One editor per question.** When someone has a question's editor open, everyone else with that project
+open sees their avatar in the corner of that question's box and the card ringed in Canonical orange —
+hovering (or tabbing to) an avatar shows the person's full name in a Vanilla `p-tooltip` — and **cannot
+change that answer**: Edit and Revert are disabled, and a muted `p-icon--lock-locked` line names who
+is in it. The editor sees their own avatar too, first in their
+editor's corner with a "(you)" tooltip, drawn locally from `myPresence` rather than from the snapshot —
+and this tab is kept out of `questionEditors`, which is what stops its own lock locking it out. There is
+no live text sync: the lock is what stops two drafts of one answer, the second Save silently overwriting
+the first.
+
+```
+presence/<sessionId>/<encodeKey(questionId)>/<tabId> = { memberId, name, photoURL, ts: serverTimestamp() }
+```
+
+**The lock belongs to a tab, not a person.** Each page load gets its own `thisTabId()`. Keyed by
+`memberId`, one user's second tab or device saw its own entry, took it for its own lock and walked in —
+two drafts of one answer again — and cancelling in either tab deleted the entry the other still needed.
+Now `questionEditors` filters out *this tab* only, so your other tab locks you like anyone else would,
+and the lock line says "You are editing this answer in another tab or window" rather than naming you to
+yourself. Entries from a build that keyed by member have no `memberId` child and are read with the key
+as the member; the two shapes still exclude each other.
+
+All of it is in `lib/presence.ts`. Things worth not undoing:
+
+- **The lock is taken in a `runTransaction`** (`claimEditing`) before the editor opens, not by reading
+  the live map. Two people clicking Edit in the same moment would each see the other absent; the
+  transaction makes the second one abort. Stale entries do not hold the lock and are dropped in passing.
+- **It fails open.** If the transaction errors (no deployed rule, say), editing is let through, so an
+  undeployed `/presence` rule leaves the app as it was rather than refusing every editor.
+- **Presence is the open editor, not focus.** Switching windows mid-draft must not hand the box to
+  somebody else, and neither must switching to the dashboard — so publishing is not gated on the view.
+  That depends on `STALE_MS` outliving a *background* tab's heartbeat (below), not a visible one's.
+- **A claim that never opens an editor is given back.** `onClaimEditing` resolves to a release, or null
+  when the lock is someone else's. If the answer was approved or the card unmounted while the claim was
+  in flight, `startEdit` releases it (`claimContext`, a ref read only after the await); otherwise nothing
+  would ever publish over the claim or tear it down, and it would lock everyone out until it went stale.
+- **Each card holds its own lock** through an effect on `editing` in `QuestionCard`
+  (`onPublishEditing`, which returns the teardown). An effect rather than the open/close buttons because
+  the editor can close with no click — a collaborator's approval, a filter change unmounting the card —
+  and a user can have two cards' editors open at once, each needing its own lock.
+- **A sibling of `/sessions`, not a child.** `subscribeToSession` listens to the whole room, so a
+  heartbeat under it would re-deliver the corpus every 15s, and `ensureSession`'s seed transaction aborts
+  on an existing node, so an early presence write would leave a room with no document.
+- **Heartbeat 15s, stale after 90s, swept every 5s** (`HEARTBEAT_MS` / `STALE_MS` / `SWEEP_MS`).
+  **90s is for background tabs:** Chrome runs the timers of a tab hidden for five minutes once a minute,
+  so a draft left open behind another window beats every ~60s. At the old 35s its lock lapsed for part
+  of every minute and anyone could claim the question. A tab also beats the moment it becomes visible
+  again. `onDisconnect().remove()` still releases a closed tab's lock at once and is re-registered every
+  beat, since a dropped connection spends it; the cost of the longer window falls only on a dead network,
+  which now holds its lock for up to 90s. A tab the browser *freezes* (no JavaScript at all) still loses
+  its lock after 90s — not fixable from a timer.
+- **Staleness is judged on server time** (`serverNow()`, via `.info/serverTimeOffset`), because `ts` is a
+  server timestamp and client clocks drift.
+- **The live map is state behind `samePresence`**, so heartbeats (which change only `ts`) and sweeps
+  re-render nothing unless someone arrived or left. Nothing in the inspector tree is memoized.
+- **Tooltips open down and inward** (`p-tooltip` from the answer box's top-left corner,
+  `p-tooltip--btm-right` from the editor's top-right) because `.question-card` and its body clip overflow.
+- **The lock blocks approval too.** A question with a live editor cannot be approved; only a lost race
+  can still close an editor by approval, and then its draft is discarded — see "Who may approve".
+- Like the approval gate, this is a UI restriction; RTDB rules do not enforce it.
 
 ### Team bank
 
@@ -621,14 +796,14 @@ page.tsx
         │   │   └── TeamMemberMultiSelect — project owners
         │   ├── CompletedProjectsList — archive rows; reopen or regenerate CSV
         │   └── MyAssignments — the signed-in user's sections + owned projects
-        ├── [live session banner]
         ├── FilterBar — status toggle, section/person dropdown, search
         ├── SectionGroup (per section)
         │   ├── TeamMemberSelect ×2 — section assignee + reviewer, offered from the project's owners
         │   │                          (sectionAssignees / sectionReviewers)
         │   ├── [collapse toggle] — hides this section's cards; per doc, via lib/expansion.ts
         │   └── QuestionCard (per item) — no assignment controls; see Assignment
-        │       ├── CopyButton, StarRating
+        │       ├── CopyButton, StarRating, AnswerEditor
+        │       ├── CommentThread — per-question comments; resolve / reopen / delete
         │       ├── [expansion] — owned by AppShell (expandedIds), remembered per doc
         │       └── [Approve / Withdraw approval] — the only writer of itemStatus
         └── RfpDatabaseView — unrelated RFP search over /rfpDatabase
@@ -681,7 +856,7 @@ SVGs with a square `viewBox` use `preserveAspectRatio="xMidYMid meet"` by defaul
   &--information { background: var(--vf-color-background-information-default); border-color: var(--vf-color-border-information); }
 }
 ```
-Use `--positive` (green) for approved/success, `--information` (blue) for ready/in-progress, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning. The same four tints carry the question-card hues (`.question-card--approved` / `--ready` / `--unanswered` / `--edited`), so a card and its section badges always read as the same colour.
+Use `--positive` (green) for approved/success, `--information` (blue) for ready/in-progress, `--negative` (red) for unanswered/error, `--caution` (amber) for edited/warning. The same four border colours outline the question cards (`.question-card--approved` / `--ready` / `--unanswered` / `--edited`), so a card and its section badges always read as the same colour. The state's tint fills **only the clickable header** (`--question-card-fill`, painted by `.question-card__header` alone) — a collapsed card is filled edge to edge, an open one only above its answer. Tinting the whole card was too much colour on a page of them.
 
 **Hiding a collapsed panel.** Use `display: none` (`.section-cards.is-collapsed`), or `visibility: hidden` where an animation has to play out first (`.question-card__body.is-collapsed`, which delays the `visibility` flip by the length of the collapse). Never `max-height: 0` alone — the contents stay in the tab order and the accessibility tree, which is how the Approve button became reachable on a card nobody could see.
 
@@ -709,16 +884,22 @@ Required `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`):
 Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel project config (`.vercel/`).
 
 `database.rules.json` defines RTDB access rules for `/sessions`, `/teamMembers`, `/savedFiles`,
-`/savedFileData`, `/rfpDatabase` and `/archivedProjects` — all restricted to authenticated
+`/savedFileData`, `/rfpDatabase`, `/archivedProjects` and `/presence` — all restricted to authenticated
 `@canonical.com` users — and `firebase.json` points the `database` deploy target at it.
 
 **Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
 access to the `canonical-req-8605` Firebase project.
 
-Two nodes are new and both fail closed until that deploy lands:
+All three of the nodes below are deployed as of 2026-10-26 (`/presence` last). What each did while its
+rule was missing is kept because it is what a missing rule looks like, should one ever be dropped — and
+`/presence` is the one to suspect first, since its failure is silent: the lock simply never engaged,
+and that is how it went unnoticed. To compare the live rules with `database.rules.json`, read
+`<databaseURL>/.settings/rules.json` with the CLI's access token.
 
 - `/savedFileData` — **deploy before shipping this build.** Documents live here, so without the rule
   every upload is rejected outright (the multi-path write is atomic, so nothing is half-saved and the
   loader reports it), and opening an already-migrated project finds no document.
 - `/archivedProjects` — archive writes are rejected, so exports download their CSV but the completed
   list stays empty and says so.
+- `/presence` — every presence write and read is rejected, silently: nobody ever shows as editing, and
+  the editor lock fails open, so simultaneous editing is possible again until the rule is live.
