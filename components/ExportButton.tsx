@@ -162,16 +162,6 @@ export default function ExportButton({
         ) : (
           <>
             <i className="p-icon--export"></i> Export CSV
-            {(editCount > 0 || ratingCount > 0) && (
-              <span className="export-button__badge">
-                {[
-                  editCount > 0 && `${editCount} edit${editCount !== 1 ? "s" : ""}`,
-                  ratingCount > 0 && `${ratingCount} rating${ratingCount !== 1 ? "s" : ""}`,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-              </span>
-            )}
           </>
         )}
       </button>

@@ -179,6 +179,13 @@
     line-height: 1;
     white-space: nowrap;
   }
+
+  // The space typed between an icon and its label is dropped once the button is a flex container — a
+  // flex item's leading whitespace collapses — which left Export CSV's icon touching its text. The gap
+  // is the spacing instead.
+  .header-actions button {
+    gap: 0.5rem;
+  }
 }
 
 .filter-bar {
@@ -1356,15 +1363,6 @@
 .share-button__status {
   max-width: 16rem;
   text-align: right;
-}
-
-.export-button__badge {
-  margin-left: 0.5rem;
-  padding: 0.0625rem 0.4rem;
-  // Square, matching the badge style used everywhere else rather than a pill.
-  border-radius: 0;
-  font-size: 0.75rem;
-  background-color: rgb(255 255 255 / 20%);
 }
 
 .file-loader {
