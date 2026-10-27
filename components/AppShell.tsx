@@ -30,12 +30,30 @@ import {
   // Aliased past the React setter of the same name below. The state setter and the RTDB writer are
   // both called `setProjectAssignees`, and the collision is exactly where a wrong one would be silent.
   setProjectAssignees as writeProjectAssignees,
+  addComment,
+  setCommentResolved,
+  deleteComment,
 } from "@/lib/session";
 import { ownerIdsFrom } from "@/lib/projects";
 import { getSavedFile, removeSavedFile, renameSavedFile, setDueDate } from "@/lib/savedFiles";
 import { createProject, readJsonFile } from "@/lib/newProject";
 import { findMemberByEmail, subscribeToTeamMembers } from "@/lib/teamBank";
 import { subscribeToAdmins, type AdminGrant } from "@/lib/admins";
+import {
+  claimEditing,
+  livePresence,
+  publishPresence,
+  releaseEditing,
+  samePresence,
+  serverNow,
+  subscribeToPresence,
+  SWEEP_MS,
+  thisTabId,
+  type PresenceEditor,
+  type PresenceMap,
+  type PresenceSnapshot,
+  type PresenceUser,
+} from "@/lib/presence";
 import {
   loadViewState,
   saveViewState,
@@ -50,6 +68,7 @@ import type {
   SessionState,
   TeamMember,
   PersonFilterOption,
+  QuestionComment,
 } from "@/lib/types";
 
 const DEFAULT_FILTERS: Filters = { status: "all", section: "", search: "" };
@@ -164,6 +183,12 @@ export default function AppShell({
   // "ready" when the answer has text and "unanswered" when it does not.
   const [itemStatus, setItemStatus] = useState<Record<string, ItemStatus>>(
     () => initialState?.itemStatus ?? {}
+  );
+  // item.id -> comment thread. Written only through the RTDB writers below and read back from the
+  // snapshot: RTDB applies a local write to the local cache at once, so a new comment appears without
+  // an optimistic copy here, and there is no second version of a thread to keep in step.
+  const [comments, setComments] = useState<Record<string, QuestionComment[]>>(
+    () => initialState?.comments ?? {}
   );
   // Keyed by section, not by question — questions are not individually assignable.
   const [sectionAssignees, setSectionAssignees] = useState<Record<string, string>>(
@@ -495,6 +520,11 @@ export default function AppShell({
     setProjectAssignees((prev) =>
       sameMap(prev, state.projectAssignees) ? prev : state.projectAssignees
     );
+    // Compared by value: `sameMap` is shallow, and every snapshot decodes fresh thread arrays, so it
+    // would see a change in any room with a comment in it on every snapshot of anything at all.
+    setComments((prev) =>
+      JSON.stringify(prev) === JSON.stringify(state.comments) ? prev : state.comments
+    );
     reportAlgoMismatch(state);
   }, [reportAlgoMismatch]);
 
@@ -513,6 +543,112 @@ export default function AppShell({
       unsubscribe();
     };
   }, [docId, applyRemoteState]);
+
+  // ── Live presence, and the one-editor-per-question lock ──
+  //
+  // Who has which question's editor open. See `lib/presence.ts` for the transport. What lives here is
+  // the signed-in user's identity bound into two callbacks, and the live map of everyone else.
+  //
+  // The cards hold their own presence, one per open editor, rather than this shell holding one slot:
+  // a user can have two cards' editors open at once, and each must hold its own lock for exactly as
+  // long as that editor is open.
+
+  const meId = me?.id;
+  const meName = me?.name;
+  const mePhoto = me?.photoURL ?? null;
+
+  // Take the lock before the editor opens. With no doc, or before the team bank has said who "me" is,
+  // there is nothing to claim against and editing is let through, as it was before there was a lock.
+  //
+  // Resolves to the claim's release, or null when somebody else holds the lock. The card calls the
+  // release only when it ends up not opening the editor after all; once it does open, the published
+  // presence owns the same entry and its teardown removes it.
+  const handleClaimEditing = useCallback(
+    (id: string): Promise<(() => void) | null> => {
+      if (!docId || !meId || !meName) return Promise.resolve(() => {});
+      return claimEditing(docId, id, { memberId: meId, name: meName, photoURL: mePhoto }).then(
+        (claimed) => (claimed ? () => releaseEditing(docId, id) : null)
+      );
+    },
+    [docId, meId, meName, mePhoto]
+  );
+
+  // Hold it while the editor is open; the returned teardown releases it. Not gated on the inspector
+  // being visible: an editor left open behind the dashboard is still open, and dropping the lock there
+  // would let somebody else in to a box this user comes back to mid-draft.
+  const handlePublishEditing = useCallback(
+    (id: string): (() => void) => {
+      if (!docId || !meId || !meName) return () => {};
+      return publishPresence(docId, id, { memberId: meId, name: meName, photoURL: mePhoto });
+    },
+    [docId, meId, meName, mePhoto]
+  );
+
+  // The latest snapshot, stale entries and all. A ref, because staleness depends on when it is read:
+  // the sweep below re-reads it on a timer without a new snapshot arriving.
+  const presenceSnapshot = useRef<{ docId: string; snapshot: PresenceSnapshot } | null>(null);
+  // The live map, tagged with the doc it belongs to (as `override` is) so a previous doc's editors are
+  // never drawn onto the next doc's question ids during a switch.
+  const [presence, setPresence] = useState<{ docId: string; editors: PresenceMap } | null>(null);
+
+  // Re-derive the live map from the last snapshot, and set it only when somebody actually arrived or
+  // left. Heartbeats change only timestamps, and an unguarded set would re-render the whole inspector
+  // every few seconds while anyone was editing.
+  const refreshPresence = useCallback(() => {
+    const latest = presenceSnapshot.current;
+    if (!latest) return;
+    const editors = livePresence(latest.snapshot, serverNow());
+    setPresence((prev) =>
+      prev && prev.docId === latest.docId && samePresence(prev.editors, editors)
+        ? prev
+        : { docId: latest.docId, editors }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!docId) return;
+    const unsubscribe = subscribeToPresence(docId, (snapshot) => {
+      presenceSnapshot.current = { docId, snapshot };
+      refreshPresence();
+    });
+    return () => {
+      unsubscribe();
+      presenceSnapshot.current = null;
+    };
+  }, [docId, refreshPresence]);
+
+  const docPresence = presence && presence.docId === docId ? presence.editors : null;
+
+  // Expire editors whose tab died without `onDisconnect` reaching the server (a dropped network rather
+  // than a closed tab). Only while somebody is shown: a stale entry never becomes live again without a
+  // fresh heartbeat, and that arrives as a snapshot, so an empty map has nothing left to sweep.
+  const presenceShown = docPresence !== null && Object.keys(docPresence).length > 0;
+  useEffect(() => {
+    if (!presenceShown) return;
+    const interval = setInterval(refreshPresence, SWEEP_MS);
+    return () => clearInterval(interval);
+  }, [presenceShown, refreshPresence]);
+
+  // What the cards draw for other tabs: every editor but this tab. My own avatar on this tab's open
+  // editor is drawn from `myPresence` below instead — straight away, without waiting on the round trip —
+  // and labelled as me. Keeping this tab out of the map is what keeps its own lock from locking it out.
+  //
+  // This *tab*, not this person: my own second tab stays in the map, so it locks this one exactly as a
+  // colleague would. Filtering on `memberId` is what let one user's two tabs both into the same answer.
+  const questionEditors = useMemo(() => {
+    const tab = thisTabId();
+    const out: Record<string, PresenceEditor[]> = {};
+    for (const [questionId, editors] of Object.entries(docPresence ?? {})) {
+      const others = editors.filter((editor) => editor.tabId !== tab);
+      if (others.length) out[questionId] = others;
+    }
+    return out;
+  }, [docPresence]);
+
+  const myPresence = useMemo<PresenceUser | undefined>(
+    () => (meId && meName ? { memberId: meId, name: meName, photoURL: mePhoto } : undefined),
+    [meId, meName, mePhoto]
+  );
 
   function toggleDark() {
     setDarkMode((d) => {
@@ -540,6 +676,7 @@ export default function AppShell({
     setSectionAssignees({});
     setSectionReviewers({});
     setProjectAssignees({});
+    setComments({});
   }, []);
 
   /**
@@ -804,6 +941,44 @@ export default function AppShell({
     revokeApprovalForEdit(id);
     writeToSession((sid) => clearAnswer(sid, id));
   }, [writeToSession, revokeApprovalForEdit]);
+
+  // Comments. The author is `myPresence`, the signed-in user's team-bank entry; with no entry yet there is
+  // nobody to attribute a comment to, and the card disables its form until there is.
+  //
+  // Posting does not go through `writeToSession`: its toast says the change "is still shown here", which
+  // is the one thing a failed comment is not — RTDB withdraws the rejected write from the thread. Instead
+  // the promise rejects, and `CommentThread` puts the text back in the box it was cleared from.
+  const handleAddComment = useCallback(
+    (id: string, text: string): Promise<void> => {
+      const posted =
+        docId && myPresence
+          ? addComment(docId, id, myPresence, text)
+          : Promise.reject(new Error("No session to post the comment to"));
+      return posted.catch((err) => {
+        showError(
+          "Comment not posted",
+          "It did not reach the server, so it has been put back in the comment box. Check your connection, then post it again."
+        );
+        throw err;
+      });
+    },
+    [docId, myPresence, showError]
+  );
+
+  const handleSetCommentResolved = useCallback(
+    (id: string, commentId: string, resolved: boolean) => {
+      if (resolved && !myPresence) return;
+      writeToSession((sid) => setCommentResolved(sid, id, commentId, resolved ? myPresence! : null));
+    },
+    [writeToSession, myPresence]
+  );
+
+  const handleDeleteComment = useCallback(
+    (id: string, commentId: string) => {
+      writeToSession((sid) => deleteComment(sid, id, commentId));
+    },
+    [writeToSession]
+  );
 
   // All four take a SectionInfo.key. Assignment is a property of a section, so there is no
   // per-question path into these any more.
@@ -1230,13 +1405,9 @@ export default function AppShell({
         )}
 
         <div className={activeView === "inspector" ? "" : "u-hide"}>
-          {/* Live session indicator */}
-          {docId && (
-            <div className="live-session-banner">
-              <span className="live-session-banner__dot" />
-              Live session, edits sync in real time
-            </div>
-          )}
+          {/* No "Live session" banner. It showed whenever any document was open and said nothing
+              about the connection itself, so it was decoration — every project is live. Who else is
+              working, and where, is shown on the question cards by presence instead. */}
 
           {data ? (
             <>
@@ -1251,17 +1422,14 @@ export default function AppShell({
                 totalCount={data.items.length}
               />
 
-              <main className="app-main">
+              {/* Wide, like the dashboard: a section header needs ~74rem to hold every slot on one line. */}
+              <main className="app-main app-main--wide">
                 {grouped.length === 0 ? (
                   <div className="empty-state">
                     <i className="p-icon--search p-icon--xx-large u-text--muted"></i>
+                    {/* No Clear button of its own: the filter bar directly above already shows
+                        "Clear filters" whenever a filter is set, which is the only way to get here. */}
                     <p className="p-heading--4">No questions match your filters</p>
-                    <button
-                      onClick={() => setFilters(DEFAULT_FILTERS)}
-                      className="p-button--link u-no-margin--bottom"
-                    >
-                      Clear all filters
-                    </button>
                   </div>
                 ) : (
                   <div className="section-groups">
@@ -1300,6 +1468,14 @@ export default function AppShell({
                         myMemberId={me?.id}
                         teamMembers={teamMembers}
                         assignableMembers={assignableMembers}
+                        questionEditors={questionEditors}
+                        myPresence={myPresence}
+                        comments={comments}
+                        onAddComment={handleAddComment}
+                        onSetCommentResolved={handleSetCommentResolved}
+                        onDeleteComment={handleDeleteComment}
+                        onClaimEditing={handleClaimEditing}
+                        onPublishEditing={handlePublishEditing}
                       />
                     ))}
                   </div>

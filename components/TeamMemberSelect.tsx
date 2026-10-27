@@ -101,6 +101,8 @@ export default function TeamMemberSelect({
         onClick={handleToggleOpen}
         aria-expanded={open}
         aria-haspopup="true"
+        // The name is ellipsed when its slot is too narrow for it, so the whole of it is on hover.
+        title={`${label} ${selected ? selected.name : "Unassigned"}`}
         className="team-member-select__trigger u-no-margin--bottom"
       >
         <span className="team-member-select__label">{label}</span>

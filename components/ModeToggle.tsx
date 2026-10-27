@@ -29,11 +29,12 @@ interface Props<T extends string> {
 }
 
 /**
- * A two-way mode switch, drawn as underline tabs: plain labels side by side, the selected one carrying
+ * A mode switch (two options or more), drawn as underline tabs: plain labels side by side, the selected one carrying
  * a thick bar beneath it.
  *
- * One component for both switches — the dashboard's Cards/List and the question card's AI/Edited — so
- * the behaviour cannot drift: they share the option mapping, the `aria-pressed` state and the refusal
+ * One component for every switch — the dashboard's Cards/List and All projects/My assignments, the
+ * question card's AI/Edited, and the filter bar's three-way All/Approved/Unanswered — so the behaviour
+ * cannot drift: they share the option mapping, the `aria-pressed` state and the refusal
  * to leave a mode whose other half has a `disabledReason`. All of the styling is in `.underline-tabs`,
  * and the bar's colour is a custom property a caller can re-point (the dashboard's is brand orange).
  *

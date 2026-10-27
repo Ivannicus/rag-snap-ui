@@ -125,6 +125,31 @@ export interface SessionState {
    * assignment is data this build declines to read rather than work nobody has done.
    */
   hasLegacyItemAssignment?: boolean;
+  /**
+   * item.id -> that question's comment thread, oldest first. Read-only in `SessionState` terms: the
+   * thread is never seeded, and every change goes through the granular writers in lib/session.ts
+   * (`addComment`, `setCommentResolved`, `deleteComment`) and comes back on the next snapshot.
+   */
+  comments: Record<string, QuestionComment[]>;
+}
+
+/**
+ * One comment on one question: a critique to address, or a reviewer's reason for not approving.
+ *
+ * Stored at `sessions/<id>/comments/<encodeKey(item.id)>/<pushId>`. Author details are denormalized onto
+ * the comment, so it still names whoever wrote it after they leave the team bank.
+ */
+export interface QuestionComment {
+  /** The push id. Push ids sort by creation time, which is the tiebreak behind `createdAt`. */
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorPhoto: string | null;
+  text: string;
+  /** Server time. */
+  createdAt: number;
+  /** Set while resolved; absent while open. Anyone may resolve or reopen. */
+  resolved?: { byId: string; byName: string; at: number };
 }
 
 export interface TeamMember {

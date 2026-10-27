@@ -31,6 +31,31 @@
   @include vanilla-framework.vf-icon-export(vanilla-framework.$colors--dark-theme--icon);
 }
 
+// The speech-bubble on a question's comment tag and thread, opted in the same way and for the same two
+// reasons: `vanilla` does not compile it, and it is one of the older single-image icons whose dark
+// variant keys on `body.is-dark`, which this app never sets.
+@include vanilla-framework.vf-p-icon-comments;
+
+.is-dark .p-icon--comments {
+  @include vanilla-framework.vf-icon-comments(vanilla-framework.$colors--dark-theme--icon);
+}
+
+// The padlock on a question card's lock lines (approved, being edited, AI answer read-only). Same story
+// again: not compiled by `vanilla`, so all three lines drew an empty box, and single-image dark variant.
+@include vanilla-framework.vf-p-icon-lock-locked;
+
+.is-dark .p-icon--lock-locked {
+  @include vanilla-framework.vf-icon-lock-locked(vanilla-framework.$colors--dark-theme--icon);
+}
+
+// The page glyph on project rows — the Projects dropdown, the Admin tab, the remove-project dialog and
+// the dashboard's empty state. Also outside the compiled set, so every one of those drew an empty box.
+@include vanilla-framework.vf-p-icon-file;
+
+.is-dark .p-icon--file {
+  @include vanilla-framework.vf-icon-file(vanilla-framework.$colors--dark-theme--icon);
+}
+
 // How wide a project's name may draw before it ellipses, wherever it shares a line with other controls.
 //
 // One value rather than one per component, because the three places that render a name on a shared line
@@ -188,11 +213,21 @@
   }
 }
 
+// Narrower than the cards below it and centred, so the controls have room either side rather than
+// running the full width of the content area: 64rem is the column the app used before the inspector
+// widened to 80rem for the section headers. The padding is `.app-main`'s, so at widths below the cap the
+// bar's edges still line up with the cards'.
+.filter-bar-wrapper {
+  max-width: 64rem;
+  margin: 1.5rem auto 0;
+  padding: 0 1rem;
+}
+
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .filter-bar__status,
@@ -200,16 +235,90 @@
   flex-shrink: 0;
 }
 
-.filter-bar__search {
-  flex: 1 1 auto;
-  min-width: 12rem;
+// The status tabs, sized like the dashboard's (`.overview__tab-toggle`): a fixed height with the label
+// centred by flex rather than resting on the shared block's bottom padding, so the bar lines up with the
+// select's and the search box's bottom edges. Same (0,3,0) selector shape, for the same reason — and,
+// as there, nothing here may touch `border-bottom-*`, or it would take the active bar's colour with it.
+.underline-tabs.filter-bar__status {
+  .underline-tabs__tab {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    height: 2.1875rem;
+    padding: 0 0.25rem;
+    line-height: 1;
+  }
+
+  // Each status's own colour on the active bar. One modifier per status, set from the current filter, so
+  // the property names the colour of whichever tab is selected.
+  &.filter-bar__status--all {
+    --underline-tabs-bar: #{vanilla-framework.$color-brand};
+  }
+
+  &.filter-bar__status--approved {
+    --underline-tabs-bar: var(--vf-color-border-positive);
+  }
+
+  &.filter-bar__status--unanswered {
+    --underline-tabs-bar: var(--vf-color-border-negative);
+  }
 }
 
+// A fixed width, not Vanilla's `width: 100%` (which took a whole row to itself) and not `auto` either.
+// An `auto` select sizes itself to its *longest option*, and the options are the open project's section
+// labels and team members — so the row's width changed from project to project, and in one with a long
+// name the dropdown grew to its cap and "Clear filters" no longer fitted on the line. Fixed, the row is
+// the same in every project; a long name is clipped in the closed box and shown in full in the list.
+.filter-bar__select {
+  width: 14rem;
+}
+
+// Two fixes so the search box has the height it looks like it has, and the count beside it centres on it.
+//
+// Vanilla's `.p-search-box` positions its input absolutely and takes its own height from the buttons
+// beside it. This one has no search button, and the reset only appears once something is typed — so with
+// an empty search the box was 0px tall, the input hung below it, and the count (centred on the box) sat
+// level with the input's top edge. The input goes back into the flow here and gives the box its height;
+// the reset is overlaid on its right end instead, which is where Vanilla's padding-right leaves room.
+//
+// And no bottom margin: Vanilla gives the box 1.25rem, and `align-items: center` centres the *margin* box.
+// `flex-basis: 0`, not `auto`, which is the other half of the wrapping bug. Line breaking in a wrapping
+// flex row goes by each item's flex *basis*, and an `auto` basis is the input's intrinsic width — wider
+// than the room left once "Clear filters" appeared — so the search box broke onto a second line even
+// though it would happily have shrunk. With a zero basis it takes only what is left, and the row wraps
+// only when that is less than its 10rem minimum — still room for the placeholder's first words, and low
+// enough that the whole row, Clear filters included, holds one line down to a ~1050px window.
+.filter-bar__search {
+  flex: 1 1 0;
+  min-width: 10rem;
+  margin-bottom: 0;
+
+  .p-search-box__input {
+    position: relative;
+    right: auto;
+  }
+
+  .p-search-box__reset {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+}
+
+// The count and "Clear filters" as one item, so if the row ever does wrap they go together.
 .filter-bar__results {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+  white-space: nowrap;
+
+  // The count is `p-text--small`, a paragraph style with a 0.95rem bottom margin and a top nudge, which
+  // lifted it above the search box's centre line. Inline here, so neither belongs.
+  .p-text--small {
+    margin: 0;
+    padding-top: 0;
+  }
 }
 
 .header-manage-users {
@@ -369,11 +478,49 @@
   }
 }
 
+// ── Section header: one fixed slot per box ──
+//
+// A grid, not a wrapping flex row. The flex row sized every box to its content, so a long assignee name
+// or a fourth badge pushed the toggle onto the next line, and the toggle's position changed from one
+// section to the next. Here each box owns a track of fixed width; the title is the only elastic one
+// (`minmax(0, 1fr)`) and absorbs the difference by ellipsis. Fixed tracks are also what line the boxes up
+// down the page, the same reasoning as `.project-list__row`, and why no track is `auto`.
+//
+// Three layouts, chosen by the width of `.section-group` (a container query, so it follows the sidebar
+// and the window alike rather than guessing at a viewport breakpoint). The fixed tracks and their gaps
+// come to 60.625rem; the breakpoints are that plus what the title needs, so move them with the widths.
+//   > 70rem    one row:  title (≥ ~9.5rem) | assignee | reviewer | questions | approved | ready | unanswered | toggle
+//   > 61rem    two rows: title …………………………………………………………………………… toggle
+//                      assignee | reviewer | questions | approved | ready | unanswered
+//   below    a wrapping row, title and toggle first.
+.section-group {
+  container: section-group / inline-size;
+}
+
 .section-header {
-  display: flex;
-  flex-wrap: wrap;
+  --section-col-person: 15rem;
+  // The four count boxes are sized to their content at two digits (measured in Ubuntu at 0.875rem, plus
+  // a sliver), not padded out: every rem they do not need goes to the section's title instead.
+  --section-col-questions: 6.5rem;
+  --section-col-approved: 6.375rem;
+  --section-col-ready: 5rem;
+  --section-col-unanswered: 7.5rem;
+  --section-col-toggle: 1.75rem;
+
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    var(--section-col-person)
+    var(--section-col-person)
+    var(--section-col-questions)
+    var(--section-col-approved)
+    var(--section-col-ready)
+    var(--section-col-unanswered)
+    var(--section-col-toggle);
+  grid-template-areas: "title assignee reviewer questions approved ready unanswered toggle";
   align-items: center;
-  gap: 0.5rem;
+  column-gap: 0.5rem;
+  row-gap: 0.5rem;
   margin-bottom: 0.75rem;
 
   .p-heading--5 {
@@ -383,12 +530,125 @@
   .section-header__block {
     height: 1.75rem;
   }
+
+  // Two digits, not the list view's three: a section holds at most 14 questions (`SECTION_CAP` 10, plus
+  // a folded-in tail of up to 4), so no count here can reach a third digit. Raise this if the cap does.
+  .section-header__count {
+    min-width: 2ch;
+  }
+
+  // Every box fills its slot, so the slot — not the box's content — sets where the next one starts.
+  //
+  // `gap: 0` because `--band-approved` carries a 0.25rem gap for the ✓ icon it holds on a question card;
+  // here it would push "Approved" 4px right of where a zero box puts it. The count's own margin is the
+  // spacing, so the label starts at the same x in every box, whatever the count or the tint.
+  .section-header__slot {
+    width: 100%;
+    min-width: 0;
+    gap: 0;
+  }
+
+  .team-member-select,
+  .team-member-select__trigger {
+    width: 100%;
+  }
+
+  // The name takes whatever the slot leaves after the label, avatar and chevron, and ellipses past it.
+  // No max-width of its own any more: the slot is the limit.
+  .team-member-select__trigger-label {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+}
+
+.section-header__title {
+  grid-area: title;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.section-header__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-header__rule {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-width: 1rem;
   height: 1px;
   background-color: var(--vf-color-border-low-contrast);
+}
+
+.section-header__slot--assignee { grid-area: assignee; }
+.section-header__slot--reviewer { grid-area: reviewer; }
+.section-header__slot--questions { grid-area: questions; }
+.section-header__slot--approved { grid-area: approved; }
+.section-header__slot--ready { grid-area: ready; }
+.section-header__slot--unanswered { grid-area: unanswered; }
+.section-header__slot--toggle { grid-area: toggle; }
+
+// A band with nothing in it: the box and its 0 stay, so the slot is never empty and the row reads the
+// same in every section, but the tint goes and the box fades — colour is kept for counts that matter.
+.section-header__block--zero {
+  background-color: transparent;
+  border-color: var(--vf-color-border-low-contrast);
+  opacity: 0.5;
+}
+
+// Two rows: the title takes the whole first row with the toggle at its right end, and the six boxes sit
+// on the second in the same fixed tracks, left-aligned, with the elastic track left empty after them.
+@container section-group (max-width: 70rem) {
+  .section-header {
+    grid-template-columns:
+      var(--section-col-person)
+      var(--section-col-person)
+      var(--section-col-questions)
+      var(--section-col-approved)
+      var(--section-col-ready)
+      var(--section-col-unanswered)
+      minmax(0, 1fr)
+      var(--section-col-toggle);
+    grid-template-areas:
+      "title title title title title title title toggle"
+      "assignee reviewer questions approved ready unanswered . .";
+  }
+}
+
+// Too narrow for six fixed tracks: let the boxes wrap at their own widths. Title and toggle stay first,
+// the toggle still at the right of the title's line.
+@container section-group (max-width: 61rem) {
+  .section-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+
+    .section-header__title {
+      order: 1;
+      flex: 1 1 calc(100% - var(--section-col-toggle) - 0.5rem);
+    }
+
+    .section-header__slot--toggle {
+      order: 2;
+      flex: none;
+      width: var(--section-col-toggle);
+    }
+
+    .section-header__slot:not(.section-header__slot--toggle) {
+      order: 3;
+      width: auto;
+    }
+
+    .section-header__slot--assignee,
+    .section-header__slot--reviewer {
+      flex: 0 1 var(--section-col-person);
+    }
+  }
 }
 
 .section-header__block {
@@ -424,6 +684,25 @@
     background-color: rgba(255, 215, 0, 0.18);
     border-color: #b8860b;
     gap: 0.25rem;
+  }
+
+  // Unresolved comments on a question: the one badge asking somebody to act, so a solid fill rather than
+  // the status tints. Canonical orange, which no status uses — amber is Edited, red is Unanswered — and a
+  // light tint of it read as pink over a blue card, too close to Unanswered. Black text on it is ~5.8:1;
+  // white would be ~3.6:1. Fixed colours rather than theme tokens, since the fill does not change with
+  // the theme either — and the icon is pinned to its dark glyph for the same reason, past the
+  // `.is-dark .p-icon--comments` rule that would otherwise turn it white on orange.
+  &--comments {
+    background-color: vanilla-framework.$color-brand;
+    border-color: vanilla-framework.$color-brand;
+    color: #000;
+    gap: 0.375rem;
+    font-weight: 600;
+
+    .p-icon--comments,
+    .is-dark & .p-icon--comments {
+      @include vanilla-framework.vf-icon-comments(vanilla-framework.$colors--light-theme--icon);
+    }
   }
 
   // ── The three workflow bands ──
@@ -534,9 +813,87 @@
   }
 }
 
-.answer-bullet {
-  margin-left: 1rem;
+// A list inside a rendered answer. Vanilla's base list has a 1.5rem bottom margin and double left
+// indent, sized for body copy; inside the answer box that read as a paragraph break after every list.
+.answer-list {
+  margin: 0.25rem 0 0.25rem 0.5rem;
+  padding-left: 1rem;
+}
+
+ul.answer-list {
   list-style: disc;
+}
+
+ol.answer-list {
+  list-style: decimal;
+}
+
+/* ── Answer editor: formatting toolbar over a textarea that grows to fit ── */
+
+.answer-editor__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  // Room on the right for the presence avatars, which sit at this row's right end.
+  padding-right: 3rem;
+  background-color: var(--vf-color-background-alt);
+  border: 1px solid var(--vf-color-border-low-contrast);
+  border-bottom: 0;
+  border-radius: 0.25rem 0.25rem 0 0;
+}
+
+// One class against Vanilla's bare `button` element rule (0,0,1), so these win without fighting a
+// `p-button` pattern; every box property is set because the bare rule sets them all.
+.answer-editor__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.75rem;
+  min-width: 2rem;
+  margin: 0;
+  padding: 0 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+
+  &:hover {
+    background-color: var(--vf-color-background-hover);
+    border-color: var(--vf-color-border-low-contrast);
+  }
+
+  &--bold {
+    font-weight: 700;
+  }
+
+  &--italic {
+    font-style: italic;
+  }
+
+  &--underline {
+    text-decoration: underline;
+  }
+}
+
+.answer-editor__divider {
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.25rem;
+  background-color: var(--vf-color-border-low-contrast);
+}
+
+// The height is set from script to the content's scroll height (`AnswerEditor`'s `fit`), so the box is
+// always exactly as tall as its text. `border-box` so that height includes the borders, which is what
+// the script adds back; `overflow: hidden` because there is never anything to scroll to; no manual
+// resize handle, since the box sizes itself.
+.answer-editor__input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  resize: none;
 }
 
 .star-rating {
@@ -750,47 +1107,41 @@
   cursor: pointer;
 }
 
-// The box hue carries the question's state, since the cards have no state badge of their own:
-// red = unanswered, blue = has an answer awaiting approval, green = a human approved it.
+// The card's outline carries the question's state, since the cards have no state badge of their own:
+// red = unanswered, blue = has an answer awaiting approval, green = a human approved it, amber = a ready
+// answer somebody edited.
 //
-// One modifier per state, all built the same way as the original --unanswered pair. --edited comes
-// last on purpose: it sets border-color only, so a ready question that has been edited keeps the blue
-// fill under an amber border. Approved cards are never given --edited, so green always stays green.
+// **The fill is on the clickable header only**, not the whole card. Tinting the whole card was too much
+// colour on a page of them; the header alone keeps the state readable at a glance down a list of
+// collapsed questions, and an opened card's answer, editor and comments sit on the plain background.
+// Each modifier sets `--question-card-fill`, and `.question-card__header` is the only thing that paints
+// it — so a collapsed card is filled edge to edge (the header covers it) and an open one only above
+// the answer.
+//
+// One modifier per state, each an outline and a fill. `--edited` comes after `--ready` on purpose, so an
+// edited ready card wears amber on both, matching its outline; approved cards are never given
+// `--edited`, so green always stays green.
 .question-card {
   overflow-x: hidden;
 
   &--unanswered {
     border-color: var(--vf-color-border-negative);
-    background-color: var(--vf-color-background-negative-default);
+    --question-card-fill: var(--vf-color-background-negative-default);
   }
 
   &--ready {
     border-color: var(--vf-color-border-information);
-    background-color: var(--vf-color-background-information-default);
-  }
-
-  &--approved {
-    border-color: var(--vf-color-border-positive);
-    background-color: var(--vf-color-background-positive-default);
+    --question-card-fill: var(--vf-color-background-information-default);
   }
 
   &--edited {
     border-color: var(--vf-color-border-caution);
+    --question-card-fill: var(--vf-color-background-caution-default);
   }
 
-  // Approval overrides the other two, matching the precedence the status derivation uses: a signed-off
-  // question is done whether or not it was blank or edited on the way there.
   &--approved {
     border-color: var(--vf-color-border-positive);
-    background-color: var(--vf-color-background-positive-default);
-  }
-
-  // Awaiting review — the AI answered it and nobody has signed it off. Border only, no background tint:
-  // this is the most common state by far, so tinting it would leave a page of cards all shouting at
-  // once and drown out the ones that actually need attention. Blue matches the ready band on the wheel
-  // and the "Ready" badge on the section header.
-  &--ready {
-    border-color: var(--vf-color-border-information);
+    --question-card-fill: var(--vf-color-background-positive-default);
   }
 }
 
@@ -799,17 +1150,53 @@
 // text was a flex item bidding against the badges for width, so the same question wrapped at a different
 // point on a card that happened to carry three badges than on one that carried none — and the leftovers
 // of that contest were what squashed the chevron.
+//
+// The button fills the whole card inside its border, not just the text's box. It is pulled out over the
+// card's padding with negative margins and given the same amount back as its own padding, so the text
+// does not move but the click target and the hover tint reach the border. `calc(1rem - 1px)` is
+// `.p-card`'s own padding (`$spv--large` less the border); the width adds both sides of it back.
+//
+// Collapsed, the button also swallows the card's bottom padding, so the tint fills the card edge to
+// edge. Open (`.is-open`), it stops short of the answer instead, and the gap to it is the 32px it was.
 .question-card__header {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 0.5rem;
-  width: 100%;
+  width: calc(100% + 2rem - 2px);
+  // Every side set: Vanilla's bare `button` rule gives buttons `margin: 0 1.5rem 1.5rem 0`, and the
+  // stray bottom margin was what made a collapsed card's bottom gap twice its top.
+  margin: calc(1px - 1rem) calc(1px - 1rem) calc(1px - 1rem);
+  padding: calc(1rem - 1px);
   text-align: left;
-  background: none;
+  // The state's fill (see `.question-card` above), or nothing for a card with no state modifier.
+  background: var(--question-card-fill, transparent);
   border: none;
-  padding: 0;
+  border-radius: 0;
   cursor: pointer;
+
+  &.is-open {
+    margin-bottom: 0;
+    padding-bottom: 1.25rem;
+  }
+
+  // Vanilla's `button:hover` (0,1,1) paints an opaque grey, which on a full-bleed header blots out the
+  // card's state hue. A tint of the text colour instead darkens a light card and lightens a dark one,
+  // and the blue/red/green underneath stays readable. Two classes' worth to beat that rule.
+  //
+  // Mixed into the state's fill rather than replacing it, so hovering darkens the colour a touch instead
+  // of wiping it out.
+  &:hover,
+  &.question-card__header:hover {
+    background-color: color-mix(in srgb, currentColor 6%, var(--question-card-fill, transparent));
+    border-color: transparent;
+  }
+
+  // Inset, so the focus ring is not clipped by the card's `overflow-x: hidden` now that the button
+  // reaches the card's edge.
+  &:focus {
+    outline-offset: -3px;
+  }
 }
 
 .question-card__meta {
@@ -1051,6 +1438,159 @@
   }
 }
 
+/* ── Live presence: someone else is in this question's edit box ── */
+
+// Canonical orange, from the same build-time token as the underline-tab bars — `$color-brand-dark` is
+// `$color-brand`, so one value covers `is-dark` too. Not `--vf-color-accent`, which is teal.
+$presence-colour: vanilla-framework.$color-brand;
+
+// Two classes, so it beats every state hue (`--unanswered` / `--ready` / `--approved` / `--edited`, all
+// one class) regardless of source order. The state comes back the moment the last editor leaves.
+.question-card.question-card--busy {
+  border-color: $presence-colour;
+}
+
+// The box itself is ringed with an *inset* shadow rather than given a border: the answer box has no
+// border to recolour in its plain state, and adding one would shift its text by a pixel whenever
+// somebody arrived or left. Inset also keeps the ring inside `.question-card__body`, which clips.
+.question-card--busy {
+  .question-card__answer,
+  .question-card__editor textarea {
+    box-shadow: inset 0 0 0 2px $presence-colour;
+  }
+}
+
+.question-card__editor {
+  position: relative;
+}
+
+// The avatar stack in the corner of whichever box is on screen. Top-right over the editor, where it sits
+// on the right end of the formatting toolbar — 0.5rem centres a 1.25rem avatar on the toolbar's 1.75rem
+// buttons inside its 0.25rem padding. Top-left over the answer box, whose top-right is already
+// `.question-card__answer-actions`, and whose 2.5rem top padding leaves the corner clear of the text.
+.question-card__presence {
+  position: absolute;
+  top: 0.5rem;
+  z-index: 1;
+
+  &--right {
+    right: 0.5rem;
+  }
+
+  &--left {
+    left: 0.5rem;
+  }
+
+  // The stack's ring is drawn in the page colour; here it sits on a tinted box, so ring in orange to
+  // read as part of the highlight rather than as a white halo.
+  .member-stack__item {
+    cursor: default;
+    box-shadow: 0 0 0 2px $presence-colour;
+  }
+}
+
+/* ── Comment thread on a question ── */
+
+.comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.comment-thread__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+// One comment: a bordered box with its author line on top. Open comments carry the brand edge so they
+// read as asking for something; resolved ones lose it and fade.
+.comment-thread__item {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--vf-color-border-low-contrast);
+  border-left: 3px solid vanilla-framework.$color-brand;
+  border-radius: 0.25rem;
+  background-color: var(--vf-color-background-default);
+
+  &.is-resolved {
+    border-left-color: var(--vf-color-border-low-contrast);
+    background-color: transparent;
+    opacity: 0.55;
+  }
+}
+
+.comment-thread__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.comment-thread__author {
+  font-weight: 600;
+  font-size: 0.875rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Square and bordered like Copy and Edit on the answer box, and packed: Vanilla gives every button a
+// 1.5rem right margin, which spread Resolve and Delete half the card apart.
+.comment-thread__actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+
+  button {
+    margin: 0;
+    border-color: var(--vf-color-border-high-contrast);
+  }
+}
+
+// The comment as written: line breaks kept, long words broken rather than pushing the card wide.
+.comment-thread__text {
+  margin-top: 0.25rem;
+  padding-top: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-thread__resolved {
+  margin-top: 0.25rem;
+  padding-top: 0;
+}
+
+// The box takes the card's full width, with Comment underneath it on the left — a column, not a row,
+// so the button never eats into the box's width.
+.comment-thread__form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+
+  textarea {
+    width: 100%;
+    min-height: 0;
+    resize: vertical;
+  }
+
+  button {
+    margin: 0;
+  }
+}
+
+// The stars and, until there is a rating, the reminder that Edit is waiting on one, on one line.
+.question-card__rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.25rem;
+}
+
 .question-card__edit-actions {
   display: flex;
   align-items: center;
@@ -1224,17 +1764,6 @@
 }
 
 
-.live-session-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--vf-color-border-positive);
-  background-color: var(--vf-color-background-positive-default);
-  color: var(--vf-color-border-positive);
-  font-size: 0.875rem;
-}
-
 // Positioning only, the notification inside keeps Vanilla's own styling. Sits above the sticky
 // header's z-index 50, and is narrow enough that the rest of the page stays clickable.
 .write-toast {
@@ -1245,23 +1774,6 @@
   width: min(24rem, calc(100vw - 2rem));
 }
 
-.live-session-banner__dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background-color: var(--vf-color-border-positive);
-  animation: live-session-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes live-session-pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-
 .app-main {
   flex: 1 1 auto;
   max-width: 64rem;
@@ -1269,6 +1781,12 @@
   margin-left: auto;
   margin-right: auto;
   padding: 1.5rem 1rem;
+}
+
+// The Collaborative UI, at the dashboard's width: Vanilla's fixed-width container, and what a section
+// header needs to hold all of its slots on one line.
+.app-main--wide {
+  max-width: 80rem;
 }
 
 // A centred column. `text-align` alone is not enough: Vanilla gives `p` and the heading classes a
@@ -1283,6 +1801,14 @@
   i {
     display: block;
     margin: 0 auto 1rem;
+  }
+
+  // Vanilla caps every heading at `max-width: 40em` and leaves it left-aligned, so the text centred inside
+  // a box anchored to the left — visibly off-centre under the icon, which centres across the full width.
+  // Auto margins centre the box itself; the cap still keeps a long message to a readable line.
+  .p-heading--4 {
+    margin-left: auto;
+    margin-right: auto;
   }
 }
 
@@ -2076,8 +2602,12 @@ $card-field-height: 1.75rem;
 //
 // `ch` is the advance measure of `0`, so `3ch` is exactly three digits — and tabular figures are what
 // make that true of the other nine as well, `1` included. `min-width` rather than `width`: a fourth digit
-// should widen the badge, not spill out of its box.
-.project-list__badge-count {
+// should widen the badge, not spill out of a fixed box and collide with the label.
+//
+// The gap to the label is a margin, not a space in the markup. `.section-header__block` is an inline flex
+// container, and a whitespace-only run between two flex items is not rendered.
+.project-list__badge-count,
+.section-header__count {
   flex: none;
   min-width: 3ch;
   text-align: center;
