@@ -73,7 +73,9 @@ interface ArchiveInput {
  * Only the newest version is kept. Any *other* entry holding the name — left by builds that did not
  * reuse one — is deleted, index and payload both, in the same atomic `update` that writes this export,
  * so the archive never holds an older copy of a project alongside the one shown. If the reused entry is
- * still submitted and a deleted one was closed, the outcome is carried over rather than lost with it.
+ * no reported deal outcome and a deleted one has one, the outcome is carried over rather than lost with
+ * it. "Reported" means the child exists at all — an explicit Submitted is a report too, so somebody
+ * setting a deal back to Submitted is not overridden by an older duplicate's Closed-Won.
  */
 export async function archiveProject(input: ArchiveInput): Promise<string> {
   const [newest, ...stale] = await entriesForFilename(input.filename);
@@ -86,8 +88,8 @@ export async function archiveProject(input: ArchiveInput): Promise<string> {
     cleanup[`payloads/${entry.id}`] = null;
   }
   const carriedStatus =
-    newest && !isClosed(newest.dealStatus)
-      ? stale.find((entry) => isClosed(entry.dealStatus))?.dealStatus
+    newest && newest.dealStatus === undefined
+      ? stale.find((entry) => entry.dealStatus !== undefined)?.dealStatus
       : undefined;
   if (carriedStatus !== undefined) cleanup[`index/${id}/dealStatus`] = carriedStatus;
 
@@ -150,18 +152,14 @@ function toDealStatus(value: unknown): DealStatus {
   return DEAL_STATUSES.includes(value as DealStatus) ? (value as DealStatus) : 'submitted';
 }
 
-/** Whether a raw `dealStatus` child records a close, as opposed to the default of submitted. */
-function isClosed(value: unknown): boolean {
-  return toDealStatus(value) !== 'submitted';
-}
-
 /**
  * One-shot read of the completed-project list, newest export first. Carries no documents.
  *
  * One row per filename. `archiveProject` now reuses a same-named entry, but entries written before it
  * did can still share a name, so they are collapsed here as well: the newest export is the row shown,
- * and if it is still submitted it borrows the close reported on an older one, rather than
- * a duplicate quietly costing that report. The older entries stay in the database untouched.
+ * and if nobody has reported its deal it borrows the outcome reported on an older one, rather than a
+ * duplicate quietly costing that report. An explicit Submitted counts as reported. The older entries
+ * stay in the database until the next export of that name removes them.
  */
 export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
   const snapshot = await get(ref(db, 'archivedProjects/index'));
@@ -182,7 +180,7 @@ export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
       itemCount: entry.itemCount ?? 0,
       sourceSessionId: entry.sourceSessionId ?? id,
       dealStatus: toDealStatus(entry.dealStatus),
-      reported: isClosed(entry.dealStatus),
+      reported: entry.dealStatus !== undefined,
     }))
     // Oldest first, so each later export of a name replaces the one before it.
     .sort((a, b) => a.exportedAt - b.exportedAt);

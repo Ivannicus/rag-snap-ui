@@ -175,7 +175,6 @@ export function computeProjectStats(
     unanswered,
     approvedFraction: itemCount > 0 ? approved / itemCount : 0,
     complete: itemCount > 0 && approved === itemCount,
-    editedCount: Object.keys(editedAnswers).length,
     ratedCount,
     ratingSum,
   };

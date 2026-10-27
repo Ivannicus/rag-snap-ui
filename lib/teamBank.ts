@@ -67,8 +67,13 @@ export type AddTeamMemberResult =
  * Keyed exactly as `ensureTeamMember` keys them, so their first sign-in finds this entry and keeps it
  * rather than adding a second. Refuses an address already in the bank rather than overwriting the
  * name its owner signed in with.
+ *
+ * Lowercased first. The key is case-sensitive and Google reports these addresses in lower case, so
+ * `Alice.Smith@…` typed by hand would be a different key from the one her sign-in writes — a second
+ * entry, with everything assigned beforehand stranded on the one she never uses.
  */
-export async function addTeamMember(name: string, email: string): Promise<AddTeamMemberResult> {
+export async function addTeamMember(name: string, rawEmail: string): Promise<AddTeamMemberResult> {
+  const email = rawEmail.trim().toLowerCase();
   const id = sanitizeEmailKey(email);
   const memberRef = ref(db, `teamMembers/${id}`);
   const snapshot = await get(memberRef);

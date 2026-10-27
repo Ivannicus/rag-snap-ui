@@ -10,6 +10,8 @@ interface Props {
   teamMembers: TeamMember[];
   /** Remove is admin-only; everyone else sees it disabled, with `ADMIN_ONLY_HINT` on hover. */
   isAdmin: boolean;
+  /** The signed-in user's member id, so their own row cannot remove them — as in the Admin tab. */
+  myMemberId: string | null;
   onError: (title: string, message: string) => void;
 }
 
@@ -31,7 +33,7 @@ interface Props {
  * The Admin tab now owns user management; this panel stays as a shortcut to the same roster, and its
  * Remove runs the same `RemoveUserDialog`. Admin-only, like the Admin tab's.
  */
-export default function ManageUsersPanel({ teamMembers, isAdmin, onError }: Props) {
+export default function ManageUsersPanel({ teamMembers, isAdmin, myMemberId, onError }: Props) {
   const [managingUsers, setManagingUsers] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
   const manageUsersRef = useRef<HTMLDivElement>(null);
@@ -67,37 +69,45 @@ export default function ManageUsersPanel({ teamMembers, isAdmin, onError }: Prop
           <div className="p-card manage-users__panel">
             {teamMembers.length > 0 ? (
               <ul className="p-list--divided u-no-margin--bottom manage-users__list">
-                {teamMembers.map((m) => (
-                  <li key={m.id} className="p-list__item filter-bar__member">
-                    <span className="filter-bar__member-info">
-                      {m.photoURL ? (
-                        // Remote avatar, static export — see TeamMemberAvatar.
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={m.photoURL}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          className="team-member-avatar"
-                        />
-                      ) : (
-                        <span className="team-member-avatar team-member-avatar--placeholder">
-                          <i className="p-icon--user"></i>
-                        </span>
-                      )}
-                      <span>{m.name}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setMemberToRemove(m)}
-                      disabled={!isAdmin}
-                      title={isAdmin ? undefined : ADMIN_ONLY_HINT}
-                      aria-label={`Remove ${m.name}`}
-                      className="p-button--negative u-no-margin--bottom is-dense"
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
+                {teamMembers.map((m) => {
+                  // The last admin removing themselves would leave nobody able to grant admin again.
+                  const blocked = !isAdmin
+                    ? ADMIN_ONLY_HINT
+                    : m.id === myMemberId
+                      ? "You cannot remove yourself"
+                      : undefined;
+                  return (
+                    <li key={m.id} className="p-list__item filter-bar__member">
+                      <span className="filter-bar__member-info">
+                        {m.photoURL ? (
+                          // Remote avatar, static export — see TeamMemberAvatar.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={m.photoURL}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            className="team-member-avatar"
+                          />
+                        ) : (
+                          <span className="team-member-avatar team-member-avatar--placeholder">
+                            <i className="p-icon--user"></i>
+                          </span>
+                        )}
+                        <span>{m.name}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setMemberToRemove(m)}
+                        disabled={blocked !== undefined}
+                        title={blocked}
+                        aria-label={`Remove ${m.name}`}
+                        className="p-button--negative u-no-margin--bottom is-dense"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="u-text--muted p-text--small u-no-margin--bottom">No team members yet.</p>

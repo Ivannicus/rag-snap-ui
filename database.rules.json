@@ -15,7 +15,7 @@
     "savedFiles": {
       ".read": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/)",
       "$fileId": {
-        ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/) && (newData.exists() || root.child('admins').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('/', '_').replace('[', '_').replace(']', '_')).exists() || data.child('uploadedByEmail').val() === auth.token.email)"
+        ".write": "auth != null && auth.token.email.matches(/.*@canonical\\.com$/) && (root.child('admins').child(auth.token.email.replace('.', '_').replace('#', '_').replace('$', '_').replace('/', '_').replace('[', '_').replace(']', '_')).exists() || (newData.exists() && (!data.exists() || newData.child('uploadedByEmail').val() === data.child('uploadedByEmail').val())) || (!newData.exists() && data.child('uploadedByEmail').val() === auth.token.email))"
       }
     },
     "savedFileData": {

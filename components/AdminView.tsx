@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import RemoveUserDialog from "./RemoveUserDialog";
 import RemoveProjectDialog from "./RemoveProjectDialog";
 import { subscribeToSavedFiles } from "@/lib/savedFiles";
-import { addTeamMember } from "@/lib/teamBank";
+import { addTeamMember, findMemberByEmail } from "@/lib/teamBank";
 import { grantAdmin, revokeAdmin, type AdminGrant } from "@/lib/admins";
 import { formatTimestamp } from "@/lib/utils";
 import type { SavedFileMeta, TeamMember } from "@/lib/types";
@@ -96,7 +96,10 @@ export default function AdminView({
   // The same live metadata listener the Projects dropdown holds — records only, never documents.
   useEffect(() => subscribeToSavedFiles(setSavedFiles), []);
 
-  const adminCount = Object.keys(admins).length;
+  // Counted over the bank, not over the grants: a grant whose id matches nobody (a mistyped CLI seed,
+  // say) is no admin anyone can sign in as, and counting it would let the last real admin revoke
+  // themselves.
+  const adminCount = teamMembers.filter((m) => admins[m.id]).length;
 
   // Admins first, then by name — the bank already arrives sorted by name.
   const visibleMembers = useMemo(() => {
@@ -113,6 +116,12 @@ export default function AdminView({
     const email = newEmail.trim();
     if (!CANONICAL_EMAIL.test(email)) {
       setAddNotice({ ok: false, text: "Enter a @canonical.com address — nobody else can sign in." });
+      return;
+    }
+    // Matched case-insensitively against the bank, so a differently capitalised address is caught as
+    // the same person rather than added twice.
+    if (findMemberByEmail(teamMembers, email)) {
+      setAddNotice({ ok: false, text: `${email} is already in the tool.` });
       return;
     }
     const name = newName.trim() || nameFromEmail(email);

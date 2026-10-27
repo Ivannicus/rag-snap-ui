@@ -449,7 +449,11 @@ loading a document to work it out is what the bandwidth rule above forbids.
 `/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project.
 `ensureTeamMember` writes an entry on first sign-in (and fills in a missing `photoURL` on a later one,
 for an entry an admin added by hand). Adding someone else (`addTeamMember`) and removing anyone
-(`removeUserFromTool` in `lib/admins.ts`) are **admin-only** — see Admin power below. Note that removing
+(`removeUserFromTool` in `lib/admins.ts`) are **admin-only** — see Admin power below. `addTeamMember`
+lowercases the address before keying it, and the Admin tab checks `findMemberByEmail` first: the key is
+case-sensitive and Google reports addresses in lower case, so a hand-typed `Alice.Smith@…` would
+otherwise become a second entry the moment Alice signs in, stranding whatever was assigned to the
+first. Note that removing
 is not a ban: sign-in is open to every `@canonical.com` account, and a removed person who signs in
 again is written straight back by `ensureTeamMember`.
 
@@ -497,20 +501,28 @@ rebuild the caller's bank key from `auth.token.email` with chained `.replace()`s
 `sanitizeEmailKey`, and look it up under `/admins`. So: `/admins/$memberId` is writable only by an
 admin; `/teamMembers/$memberId` only by its owner or an admin; and a `/savedFiles/$fileId` or
 `/savedFileData/$fileId` *deletion* only by an admin or the record's `uploadedByEmail` (which is what
-keeps Discard batch working for a non-admin). Writes that leave the node in place are unchanged. **If
+keeps Discard batch working for a non-admin). For a non-admin, a write that leaves a `/savedFiles`
+record in place must also leave its `uploadedByEmail` as it was — otherwise "uploader" is something
+anyone could become one write before deleting. Every app writer keeps the field (`updateExistingDoc`
+copies the record, the migration writes per field). Not covered, and no worse than before this rule
+existed: a non-admin can still overwrite a record's other fields or a stored document. **If
 `sanitizeEmailKey` ever changes, the rules' replace chain has to change with it**, or nobody's key
 matches and every admin check fails.
 
 **There is no in-app bootstrap.** Only admins can write `/admins`, and only admins can see the Admin
 tab, so if `/admins` is ever empty it has to be seeded from the Firebase CLI, which bypasses the rules
 (`firebase database:set /admins/<TeamMember.id> …`). The first admin was seeded that way. The Admin tab
-refuses to let the last admin revoke themselves, or anyone remove themselves, so this should only be
-needed after a manual edit in the console.
+refuses to let the last admin revoke themselves, and neither it nor the dashboard's Manage Users lets
+anyone remove themselves, so this should only be needed after a manual edit in the console. "Last"
+counts grants held by people in the bank, not every key under `/admins`, so a stray grant matching
+nobody cannot stand in for a real admin.
 
 `removeUserFromTool` deletes the bank entry and the admin grant in one multi-path `update`, then runs
 `revertAssignmentsForMember`. The grant has to go too: it is keyed by the same id, which
 `ensureTeamMember` restores on the person's next sign-in, so a leftover grant would hand a removed
-person their admin power back on arrival.
+person their admin power back on arrival. It throws only if that removal is refused; the assignment
+scan can fail separately after it has landed, and comes back as `assignmentsCleared: false` so the
+dialog says "removed, but not from every section" rather than the untrue "not removed".
 
 **The Admin tab (`AdminView`) is for admins only.** The sidebar entry is rendered only while `isAdmin`,
 and `AppShell` renders `AdminView` only while `isAdmin` too — admin power arrives live and can be
@@ -586,7 +598,9 @@ export-and-remove followed by a re-upload of the same file exports from a *new* 
 `archiveProject` reuses the newest entry already holding that filename (`entriesForFilename`): time,
 exporter, payload and `sourceSessionId` move to the new export, `dealStatus` stays. **Only the newest
 version is kept** — any other entry with the name is deleted (index and payload) in the same atomic
-`update`, its deal outcome carried over if the kept one has none. A same-project re-export needs none
+`update`, its deal outcome carried over if the kept one has none. "Has one" means the `dealStatus`
+child exists at all: an explicit Submitted is a report, so setting a deal back to Submitted is not
+overridden by an older duplicate's Closed-Won. A same-project re-export needs none
 of this: the entry is keyed by the project, so it is overwritten in place. Duplicates written before
 this are only cleaned up by the next export of that name, so `listArchivedProjects` still collapses
 same-named entries on read (newest wins, borrowing an older one's outcome if the newest has none).

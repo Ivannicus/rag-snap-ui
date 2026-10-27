@@ -24,8 +24,14 @@ export default function RemoveUserDialog({ member, onClose, onError }: Props) {
   async function confirm() {
     setRemoving(true);
     try {
-      await removeUserFromTool(member.id);
+      const { assignmentsCleared } = await removeUserFromTool(member.id);
       onClose();
+      if (!assignmentsCleared) {
+        onError(
+          `${member.name} was removed, but not from every section`,
+          "Some sections may still name them as answerer or reviewer, or list them as an owner. Reassign those by hand."
+        );
+      }
     } catch {
       onClose();
       onError(

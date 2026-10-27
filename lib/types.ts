@@ -220,7 +220,6 @@ export interface ProjectStats {
   approvedFraction: number;
   /** True once every item is approved. False for an empty project. */
   complete: boolean;
-  editedCount: number;
   /** Questions carrying a valid 1–5 star rating. */
   ratedCount: number;
   /** Sum of those ratings, so an average can be taken across projects without re-reading them. */

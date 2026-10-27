@@ -92,11 +92,20 @@ export function revokeAdmin(memberId: string): Promise<void> {
  * The admin grant goes with the entry because it is keyed by the same id, and `ensureTeamMember` writes
  * that id straight back when they next sign in — a grant left behind would hand a removed person their
  * admin power back on arrival. One multi-path `update`, so neither half can land without the other.
+ *
+ * Throws only if that removal is refused. Clearing their assignments is a separate scan of every room
+ * and can fail on its own after the removal has landed, so it is reported in the result instead —
+ * "was not removed" would be untrue by then.
  */
-export async function removeUserFromTool(memberId: string): Promise<void> {
+export async function removeUserFromTool(memberId: string): Promise<{ assignmentsCleared: boolean }> {
   await update(ref(db), {
     [`teamMembers/${memberId}`]: null,
     [`admins/${memberId}`]: null,
   });
-  await revertAssignmentsForMember(memberId);
+  try {
+    await revertAssignmentsForMember(memberId);
+    return { assignmentsCleared: true };
+  } catch {
+    return { assignmentsCleared: false };
+  }
 }

@@ -475,7 +475,12 @@ export default function OverviewView({
           {/* The global user bank — who is and is not in the tool at all. Moved here from the Collab
               UI header, where it was both the wrong scope for that view and unreachable from this
               tab. Per-project team is `ProjectTeamPanel`, over in the header. */}
-          <ManageUsersPanel teamMembers={teamMembers} isAdmin={isAdmin} onError={onError} />
+          <ManageUsersPanel
+            teamMembers={teamMembers}
+            isAdmin={isAdmin}
+            myMemberId={me?.id ?? null}
+            onError={onError}
+          />
         </div>
       </div>
 
