@@ -1,4 +1,4 @@
-import { ref, get, set, remove, onValue } from 'firebase/database';
+import { ref, get, set, update, onValue } from 'firebase/database';
 import { db } from './firebase';
 import type { TeamMember } from './types';
 
@@ -40,7 +40,8 @@ interface EnsureTeamMemberInput {
 }
 
 // Writes a team member once, on their first sign-in, keyed by their email.
-// No-ops if that email is already in the bank.
+// No-ops if that email is already in the bank — except to fill in a missing photo, which is what an
+// entry an admin added by hand (`addTeamMember`) is waiting on until its owner first signs in.
 export async function ensureTeamMember({
   name,
   email,
@@ -48,12 +49,32 @@ export async function ensureTeamMember({
 }: EnsureTeamMemberInput): Promise<void> {
   const memberRef = ref(db, `teamMembers/${sanitizeEmailKey(email)}`);
   const snapshot = await get(memberRef);
-  if (snapshot.exists()) return;
+  if (snapshot.exists()) {
+    if (photoURL && !snapshot.child('photoURL').exists()) await update(memberRef, { photoURL });
+    return;
+  }
   await set(memberRef, { name, email, photoURL: photoURL ?? null, createdAt: Date.now() });
 }
 
-export function removeTeamMember(memberId: string): Promise<void> {
-  return remove(ref(db, `teamMembers/${memberId}`));
+export type AddTeamMemberResult =
+  | { ok: true; id: string }
+  | { ok: false; reason: 'exists'; id: string };
+
+/**
+ * Add somebody to the bank before they have signed in, so they can be made an owner or assigned a
+ * section straight away. Admin-only — the rules refuse a write to anybody else's key otherwise.
+ *
+ * Keyed exactly as `ensureTeamMember` keys them, so their first sign-in finds this entry and keeps it
+ * rather than adding a second. Refuses an address already in the bank rather than overwriting the
+ * name its owner signed in with.
+ */
+export async function addTeamMember(name: string, email: string): Promise<AddTeamMemberResult> {
+  const id = sanitizeEmailKey(email);
+  const memberRef = ref(db, `teamMembers/${id}`);
+  const snapshot = await get(memberRef);
+  if (snapshot.exists()) return { ok: false, reason: 'exists', id };
+  await set(memberRef, { name, email, photoURL: null, createdAt: Date.now() });
+  return { ok: true, id };
 }
 
 /**

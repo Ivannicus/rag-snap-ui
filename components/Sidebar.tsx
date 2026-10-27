@@ -9,6 +9,8 @@ interface Props {
   darkMode: boolean;
   onToggleDark: () => void;
   onSignOut?: () => void;
+  /** Admins only. Everyone else never sees the Admin entry at all. */
+  showAdmin: boolean;
 }
 
 export default function Sidebar({
@@ -18,6 +20,7 @@ export default function Sidebar({
   darkMode,
   onToggleDark,
   onSignOut,
+  showAdmin,
 }: Props) {
   return (
     <aside className="app-sidebar">
@@ -64,6 +67,18 @@ export default function Sidebar({
           </svg>
           RFP Database
         </button>
+        {showAdmin && (
+        <button
+          onClick={() => onChangeView("admin")}
+          className={`app-sidebar__nav-item${activeView === "admin" ? " is-active" : ""}`}
+        >
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.040A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+          Admin
+        </button>
+        )}
       </nav>
 
       {/* Footer */}

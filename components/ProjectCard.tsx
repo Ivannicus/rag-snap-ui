@@ -17,6 +17,8 @@ interface Props {
   onOpen: (projectId: string) => void;
   onChangeOwners: (projectId: string, memberIds: string[]) => void;
   onChangeDueDate: (projectId: string, isoDate: string | null) => void;
+  /** Scroll the dashboard down to the completed and exported list. */
+  onShowCompleted: () => void;
 }
 
 /** Green once everything is approved, amber while work is outstanding, red when overdue. */
@@ -35,6 +37,7 @@ export default function ProjectCard({
   onOpen,
   onChangeOwners,
   onChangeDueDate,
+  onShowCompleted,
 }: Props) {
   const { meta, overlays, stats } = project;
   const overdue = isOverdue(meta, stats);
@@ -167,23 +170,35 @@ export default function ProjectCard({
         </button>
 
         {/* Export provenance, on hover or focus. Always rendered, so it sits in the same place on every
-            card; faded when there is nothing to report yet. */}
-        <span
-          className={`p-tooltip--top-center project-card__export-info${
-            meta.exportedAt === null ? " is-empty" : ""
-          }`}
-          tabIndex={0}
-          aria-describedby={`export-info-${meta.id}`}
-        >
-          <i className="p-icon--export" aria-hidden></i>
-          <span className="p-tooltip__message" role="tooltip" id={`export-info-${meta.id}`}>
-            {meta.exportedAt === null
-              ? "Not yet exported"
-              : `Exported ${formatTimestamp(meta.exportedAt)}${
-                  meta.exportedBy ? `\nby ${meta.exportedBy}` : ""
-                }`}
+            card; faded when there is nothing to report yet. Once exported it is also a button that
+            jumps down to the completed list, where the archived copy can be re-downloaded. */}
+        {meta.exportedAt === null ? (
+          <span
+            className="p-tooltip--top-center project-card__export-info is-empty"
+            tabIndex={0}
+            aria-describedby={`export-info-${meta.id}`}
+          >
+            <i className="p-icon--export" aria-hidden></i>
+            <span className="p-tooltip__message" role="tooltip" id={`export-info-${meta.id}`}>
+              Not yet exported
+            </span>
           </span>
-        </span>
+        ) : (
+          <button
+            type="button"
+            className="p-tooltip--top-center project-card__export-info is-link"
+            onClick={onShowCompleted}
+            aria-label="Show in completed and exported"
+            aria-describedby={`export-info-${meta.id}`}
+          >
+            <i className="p-icon--export" aria-hidden></i>
+            <span className="p-tooltip__message" role="tooltip" id={`export-info-${meta.id}`}>
+              {`Exported ${formatTimestamp(meta.exportedAt)}${
+                meta.exportedBy ? `\nby ${meta.exportedBy}` : ""
+              }\nClick to view in completed`}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );

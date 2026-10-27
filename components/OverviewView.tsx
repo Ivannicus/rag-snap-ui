@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProjectCard from "./ProjectCard";
 import ProjectListRow from "./ProjectListRow";
 import ProjectSummaryStrip from "./ProjectSummaryStrip";
@@ -83,6 +83,8 @@ interface Props {
    * exported elsewhere without a page reload.
    */
   refreshKey: number;
+  /** Whether the signed-in user holds admin power. Gates Manage Users' Remove. */
+  isAdmin: boolean;
 }
 
 export default function OverviewView({
@@ -93,6 +95,7 @@ export default function OverviewView({
   openingProjectId,
   onError,
   refreshKey,
+  isAdmin,
 }: Props) {
   const [metas, setMetas] = useState<ProjectMeta[] | null>(null);
   const [overlaysById, setOverlaysById] = useState<Record<string, ProjectOverlays>>({});
@@ -103,6 +106,12 @@ export default function OverviewView({
   const [tab, setTab] = useState<Tab>("projects");
   // List is the default for anyone who has never picked; a stored choice of either wins after mount.
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  // Target of an exported card's export icon, which jumps down to the completed list.
+  const completedRef = useRef<HTMLDivElement>(null);
+  const showCompleted = useCallback(() => {
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    completedRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }, []);
   const [sortKey, setSortKey] = useState<SortKey>("dueDate");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -389,7 +398,7 @@ export default function OverviewView({
    */
   const handleChangeDealStatus = useCallback(
     (archiveId: string, status: DealStatus) => {
-      const previous = archived.find((entry) => entry.id === archiveId)?.dealStatus ?? "pending";
+      const previous = archived.find((entry) => entry.id === archiveId)?.dealStatus ?? "submitted";
       const patch = (next: DealStatus) =>
         setArchived((prev) =>
           prev.map((entry) => (entry.id === archiveId ? { ...entry, dealStatus: next } : entry))
@@ -466,7 +475,7 @@ export default function OverviewView({
           {/* The global user bank — who is and is not in the tool at all. Moved here from the Collab
               UI header, where it was both the wrong scope for that view and unreachable from this
               tab. Per-project team is `ProjectTeamPanel`, over in the header. */}
-          <ManageUsersPanel teamMembers={teamMembers} />
+          <ManageUsersPanel teamMembers={teamMembers} isAdmin={isAdmin} onError={onError} />
         </div>
       </div>
 
@@ -664,19 +673,22 @@ export default function OverviewView({
                   onOpen={onOpenProject}
                   onChangeOwners={handleChangeOwners}
                   onChangeDueDate={handleChangeDueDate}
+                  onShowCompleted={showCompleted}
                 />
               ))}
             </div>
           )}
 
-          <CompletedProjectsList
-            archived={archived}
-            loading={archiveLoading}
-            liveProjectIds={liveProjectIds}
-            onOpenProject={onOpenProject}
-            onChangeDealStatus={handleChangeDealStatus}
-            onError={onError}
-          />
+          <div ref={completedRef} className="overview__completed-anchor">
+            <CompletedProjectsList
+              archived={archived}
+              loading={archiveLoading}
+              liveProjectIds={liveProjectIds}
+              onOpenProject={onOpenProject}
+              onChangeDealStatus={handleChangeDealStatus}
+              onError={onError}
+            />
+          </div>
         </>
       )}
     </main>

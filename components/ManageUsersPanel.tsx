@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { removeTeamMember } from "@/lib/teamBank";
-import { revertAssignmentsForMember } from "@/lib/session";
+import RemoveUserDialog from "./RemoveUserDialog";
+import { ADMIN_ONLY_HINT } from "@/lib/admins";
 import type { TeamMember } from "@/lib/types";
 
 interface Props {
   /** The whole team bank. This control is about the bank itself, not about any one project. */
   teamMembers: TeamMember[];
+  /** Remove is admin-only; everyone else sees it disabled, with `ADMIN_ONLY_HINT` on hover. */
+  isAdmin: boolean;
+  onError: (title: string, message: string) => void;
 }
 
 /**
@@ -15,8 +18,8 @@ interface Props {
  *
  * This is the old header "Manage Users" control, moved to the Overview dashboard and otherwise
  * unchanged — same label, same brand/base trigger, same per-row Remove, same confirmation modal, same
- * `removeTeamMember` + `revertAssignmentsForMember` pair. It sat in the Collab UI header, which was the
- * wrong place twice over: it is a portfolio-wide administrative action rather than anything to do with
+ * removal (now `removeUserFromTool`, which also revokes any admin grant). It sat in the Collab UI
+ * header, which was the wrong place twice over: it is a portfolio-wide administrative action rather than anything to do with
  * the document on screen, and `Header` is hidden on the dashboard, so the tab that owns assignment
  * could not reach it at all. The per-project roster that reader actually wanted is
  * `ProjectTeamPanel`.
@@ -24,8 +27,11 @@ interface Props {
  * Note what removing here does and the per-project panel does not: it deletes the person from the bank
  * and then reverts every assignment naming them across every session. Taking somebody off one project
  * is `ProjectTeamPanel`'s Remove, which touches only that project's `projectAssignees`.
+ *
+ * The Admin tab now owns user management; this panel stays as a shortcut to the same roster, and its
+ * Remove runs the same `RemoveUserDialog`. Admin-only, like the Admin tab's.
  */
-export default function ManageUsersPanel({ teamMembers }: Props) {
+export default function ManageUsersPanel({ teamMembers, isAdmin, onError }: Props) {
   const [managingUsers, setManagingUsers] = useState(false);
   const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
   const manageUsersRef = useRef<HTMLDivElement>(null);
@@ -45,13 +51,6 @@ export default function ManageUsersPanel({ teamMembers }: Props) {
     return () => document.removeEventListener("click", handleClickOutside, true);
   }, [managingUsers, memberToRemove]);
 
-  function confirmRemoveMember() {
-    if (!memberToRemove) return;
-    removeTeamMember(memberToRemove.id);
-    revertAssignmentsForMember(memberToRemove.id);
-    setMemberToRemove(null);
-  }
-
   return (
     <>
       <div className="manage-users" ref={manageUsersRef}>
@@ -67,7 +66,7 @@ export default function ManageUsersPanel({ teamMembers }: Props) {
         {managingUsers && (
           <div className="p-card manage-users__panel">
             {teamMembers.length > 0 ? (
-              <ul className="p-list--divided u-no-margin--bottom">
+              <ul className="p-list--divided u-no-margin--bottom manage-users__list">
                 {teamMembers.map((m) => (
                   <li key={m.id} className="p-list__item filter-bar__member">
                     <span className="filter-bar__member-info">
@@ -90,8 +89,10 @@ export default function ManageUsersPanel({ teamMembers }: Props) {
                     <button
                       type="button"
                       onClick={() => setMemberToRemove(m)}
+                      disabled={!isAdmin}
+                      title={isAdmin ? undefined : ADMIN_ONLY_HINT}
                       aria-label={`Remove ${m.name}`}
-                      className="p-button--brand u-no-margin--bottom is-dense"
+                      className="p-button--negative u-no-margin--bottom is-dense"
                     >
                       Remove
                     </button>
@@ -106,47 +107,11 @@ export default function ManageUsersPanel({ teamMembers }: Props) {
       </div>
 
       {memberToRemove && (
-        <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="remove-member-title">
-          <div className="p-modal__dialog">
-            <header className="p-modal__header">
-              <h2 className="p-modal__title" id="remove-member-title">Remove team member?</h2>
-            </header>
-            <div className="remove-member-modal__body">
-              {memberToRemove.photoURL ? (
-                // Remote avatar, static export — see TeamMemberAvatar.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={memberToRemove.photoURL}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="team-member-avatar team-member-avatar--large"
-                />
-              ) : (
-                <span className="team-member-avatar team-member-avatar--large team-member-avatar--placeholder">
-                  <i className="p-icon--user"></i>
-                </span>
-              )}
-              <div>
-                <p className="u-no-margin--bottom"><strong>{memberToRemove.name}</strong></p>
-                <p className="u-text--muted p-text--small u-no-margin--bottom">{memberToRemove.email}</p>
-              </div>
-            </div>
-            <footer className="p-modal__footer">
-              <button
-                className="p-button--base u-no-margin--bottom"
-                onClick={() => setMemberToRemove(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="p-button--negative u-no-margin--bottom"
-                onClick={confirmRemoveMember}
-              >
-                Remove
-              </button>
-            </footer>
-          </div>
-        </div>
+        <RemoveUserDialog
+          member={memberToRemove}
+          onClose={() => setMemberToRemove(null)}
+          onError={onError}
+        />
       )}
     </>
   );

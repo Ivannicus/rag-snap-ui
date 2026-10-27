@@ -1,21 +1,10 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { subscribeToSavedFiles, removeSavedFile, getSavedFile } from "@/lib/savedFiles";
-import { getSessionOverlays } from "@/lib/session";
-import { exportProject } from "@/lib/export";
+import RemoveProjectDialog from "./RemoveProjectDialog";
+import { subscribeToSavedFiles, getSavedFile } from "@/lib/savedFiles";
+import { ADMIN_ONLY_HINT } from "@/lib/admins";
 import type { ParsedQAFile, SavedFileMeta } from "@/lib/types";
-
-/** `3 Sep 2026, 14:20` — enough to tell two exports of the same project apart. */
-function formatExportedAt(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 interface Props {
   /** `docId` is the saved-file id, which is also the id of the doc's collaboration room. */
@@ -34,9 +23,17 @@ interface Props {
    * pure picker over what is already saved.
    */
   onNewProject: () => void;
+  /** Removing a project is admin-only; everyone else sees Remove disabled, with `ADMIN_ONLY_HINT`. */
+  isAdmin: boolean;
 }
 
-export default function FileLoader({ onLoad, onDocRemoved, onExported, onNewProject }: Props) {
+export default function FileLoader({
+  onLoad,
+  onDocRemoved,
+  onExported,
+  onNewProject,
+  isAdmin,
+}: Props) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,9 +43,6 @@ export default function FileLoader({ onLoad, onDocRemoved, onExported, onNewProj
   const [fileToRemove, setFileToRemove] = useState<SavedFileMeta | null>(null);
   // The doc whose document is being fetched from a click on its row, so the row can say so.
   const [openingId, setOpeningId] = useState<string | null>(null);
-  // Set while the confirmation's "Export and remove" is fetching the document and overlays it needs
-  // to build the CSV, so the dialog can say so and refuse a second click.
-  const [exportingBeforeRemove, setExportingBeforeRemove] = useState(false);
 
   useEffect(() => {
     return subscribeToSavedFiles(setSavedFiles);
@@ -128,93 +122,6 @@ export default function FileLoader({ onLoad, onDocRemoved, onExported, onNewProj
     }
   }
 
-  /**
-   * Download this project's CSV, then remove it — the file loader's version of the header's
-   * Export-and-remove, and the same sequence in the same order.
-   *
-   * The export runs through the shared `exportProject`, so a project taken out of the list from here
-   * is archived and stamped exactly as one exported from inside the document, and re-downloads from
-   * the completed list byte for byte.
-   *
-   * Two things have to be fetched first, because this row carries metadata only: the document, and
-   * the room's overlays, which hold the edits and ratings that make the CSV worth keeping. They run
-   * together — neither depends on the other.
-   *
-   * Nothing is removed unless the download actually started. That is the whole point of the pairing:
-   * `downloadCsv` reports only that the browser was handed the file, which is the strongest signal
-   * available, and it is a far better gate than removing first and hoping.
-   */
-  async function exportAndRemoveFile() {
-    if (!fileToRemove) return;
-    const target = fileToRemove;
-    setError(null);
-    setExportingBeforeRemove(true);
-    try {
-      const [saved, overlays] = await Promise.all([
-        getSavedFile(target.id),
-        getSessionOverlays(target.id),
-      ]);
-      if (!saved) {
-        setFileToRemove(null);
-        setError(`"${target.filename}" could not be read, so nothing was exported or removed.`);
-        return;
-      }
-
-      const { downloaded, archived } = exportProject({
-        data: saved.data,
-        editedAnswers: overlays.editedAnswers,
-        ratings: overlays.ratings,
-        contextUrls: overlays.contextUrls,
-        sourceFilename: saved.filename,
-        docId: saved.id,
-      });
-
-      if (!downloaded) {
-        setFileToRemove(null);
-        setError(
-          `"${target.filename}" could not be turned into a CSV. Nothing was downloaded and nothing was removed.`
-        );
-        return;
-      }
-
-      // Surfaced but not awaited, like every other archive write: the CSV is already on its way to
-      // disk, and this is the difference between being able to re-download it later and not.
-      archived?.catch(() =>
-        setError(
-          `"${target.filename}" downloaded, but it could not be added to the completed list — keep the file you just saved.`
-        )
-      );
-      onExported();
-
-      await removeSavedFile(target.id);
-      setFileToRemove(null);
-      onDocRemoved(target.id);
-    } catch {
-      setFileToRemove(null);
-      setError(
-        `"${target.filename}" could not be removed. If the CSV downloaded, that copy is yours — the project is still in the list.`
-      );
-    } finally {
-      setExportingBeforeRemove(false);
-    }
-  }
-
-  async function confirmRemoveFile() {
-    if (!fileToRemove) return;
-    const removed = fileToRemove;
-    setError(null);
-    try {
-      await removeSavedFile(removed.id);
-    } catch {
-      setFileToRemove(null);
-      setError("Could not remove that file. Please try again.");
-      return;
-    }
-    setFileToRemove(null);
-    // Only after the removal succeeds, and only closes the view if this is the doc on screen.
-    onDocRemoved(removed.id);
-  }
-
   return (
     <>
     <div className="file-loader" ref={wrapperRef}>
@@ -270,8 +177,12 @@ export default function FileLoader({ onLoad, onDocRemoved, onExported, onNewProj
                     </span>
                   </button>
                   <button
-                    onClick={() => setFileToRemove(f)}
-                    disabled={openingId !== null}
+                    onClick={() => {
+                      setError(null);
+                      setFileToRemove(f);
+                    }}
+                    disabled={openingId !== null || !isAdmin}
+                    title={isAdmin ? undefined : ADMIN_ONLY_HINT}
                     aria-label={`Remove ${f.filename}`}
                     className="p-button--negative u-no-margin--bottom is-dense file-loader__remove-button"
                   >
@@ -294,76 +205,14 @@ export default function FileLoader({ onLoad, onDocRemoved, onExported, onNewProj
     </div>
 
     {fileToRemove && (
-      <div className="p-modal" role="dialog" aria-modal="true" aria-labelledby="remove-file-title">
-        <div className="p-modal__dialog">
-          <header className="p-modal__header">
-            <h2 className="p-modal__title" id="remove-file-title">Remove saved file?</h2>
-          </header>
-          <div className="remove-member-modal__body">
-            <i className="p-icon--file p-icon--large"></i>
-            <div>
-              <p className="u-no-margin--bottom"><strong>{fileToRemove.filename}</strong></p>
-              <p className="u-text--muted p-text--small u-no-margin--bottom">
-                Uploaded by {fileToRemove.uploadedByName} ({fileToRemove.uploadedByEmail})
-              </p>
-            </div>
-          </div>
-          {/* Stated here as well as on the row, because this is the last screen before the project
-              leaves the shared list for everyone, and whether its results were ever taken off the
-              system is the one fact that decides whether that is safe. */}
-          {fileToRemove.exportedAt !== null ? (
-            <p className="u-no-margin--bottom file-loader__export-status file-loader__export-status--done">
-              <i className="p-icon--success" aria-hidden></i> Exported{" "}
-              {formatExportedAt(fileToRemove.exportedAt)}
-              {fileToRemove.exportedBy ? ` by ${fileToRemove.exportedBy}` : ""}, so the results are in
-              the completed list and can be downloaded again from there.
-            </p>
-          ) : (
-            <p className="u-no-margin--bottom file-loader__export-status file-loader__export-status--none">
-              <i className="p-icon--warning" aria-hidden></i> Never exported. Removing it discards the
-              answers, edits and ratings with no CSV anywhere — export it first if you want a copy.
-            </p>
-          )}
-          <footer className="p-modal__footer">
-            <button
-              className="p-button--base u-no-margin--bottom"
-              onClick={() => setFileToRemove(null)}
-              disabled={exportingBeforeRemove}
-            >
-              Cancel
-            </button>
-            {/* The way out of removing a project whose results nobody has saved: take the CSV first,
-                in one step, rather than cancelling, opening the project and exporting it from there.
-                Same sequence as the header's Export-and-remove, and the export has to succeed before
-                anything is removed. */}
-            <button
-              className="p-button--positive u-no-margin--bottom"
-              onClick={exportAndRemoveFile}
-              disabled={exportingBeforeRemove}
-            >
-              {exportingBeforeRemove ? (
-                <>
-                  <i className="p-icon--spinner u-animation--spin is-light" aria-hidden></i>{" "}
-                  Exporting…
-                </>
-              ) : (
-                <>
-                  <i className="p-icon--export is-light" aria-hidden></i> Export and remove
-                </>
-              )}
-            </button>
-            <button
-              className="p-button--negative u-no-margin--bottom"
-              onClick={confirmRemoveFile}
-              disabled={exportingBeforeRemove}
-            >
-              Remove
-            </button>
-          </footer>
-        </div>
-      </div>
+      <RemoveProjectDialog
+        file={fileToRemove}
+        onClose={() => setFileToRemove(null)}
+        onDocRemoved={onDocRemoved}
+        onExported={onExported}
+        onError={setError}
+      />
     )}
-
     </>
   );
 }

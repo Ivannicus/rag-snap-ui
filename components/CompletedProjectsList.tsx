@@ -16,25 +16,30 @@ import type { ArchivedProjectMeta, DealStatus } from "@/lib/types";
  */
 type CompletedFilter = "all" | "reopen" | "csv" | DealStatus;
 
-/** The dropdown on each row. Order is worst-to-best deliberately left alone — see `DEAL_LABELS`. */
+/** The dropdown on each row: the open state first, then the four ways an RFX closes. */
 const DEAL_OPTIONS: ReadonlyArray<{ value: DealStatus; label: string }> = [
-  { value: "pending", label: "Pending" },
-  { value: "won", label: "Won" },
-  { value: "lost", label: "Lost" },
+  { value: "submitted", label: "Submitted" },
+  { value: "won", label: "Closed-Won" },
+  { value: "lost", label: "Closed-Lost" },
+  { value: "no-decision", label: "Closed-No-Decision" },
+  { value: "no-bid", label: "Closed-No-Bid" },
 ];
 
 /**
  * Status to badge tint, from the four the app allows.
  *
- * `positive` for won, `negative` for lost, `caution` for pending — the same three the question cards
+ * `positive` for won, `negative` for lost, `caution` for submitted — the same three the question cards
  * and section badges use for approved, unanswered and edited, so a colour means one thing across the
- * app. `information` (blue) is deliberately unused here: it reads as "in progress", and a completed
- * project's deal is not a progress bar.
+ * app. No-decision and no-bid are closed but neither a win nor a loss, so they stay untinted rather
+ * than borrowing a colour that would claim one. `information` (blue) is deliberately unused: it reads
+ * as "in progress", and a completed project's deal is not a progress bar.
  */
-const DEAL_TINT: Record<DealStatus, string> = {
+const DEAL_TINT: Record<DealStatus, string | null> = {
+  submitted: "caution",
   won: "positive",
   lost: "negative",
-  pending: "caution",
+  "no-decision": null,
+  "no-bid": null,
 };
 
 interface Props {
@@ -203,6 +208,7 @@ export default function CompletedProjectsList({
           {visible.map((entry) => {
             const stillLive = liveProjectIds.has(entry.sourceSessionId);
             const busy = busyId === entry.id;
+            const tint = DEAL_TINT[entry.dealStatus];
             return (
               <li key={entry.id} className="p-list__item completed-row">
                 <i className="p-icon--archive completed-row__icon" aria-hidden></i>
@@ -232,9 +238,7 @@ export default function CompletedProjectsList({
                   value={entry.dealStatus}
                   onChange={(e) => onChangeDealStatus(entry.id, e.target.value as DealStatus)}
                   aria-label={`Deal status for ${entry.filename}`}
-                  className={`completed-row__status completed-row__status--${
-                    DEAL_TINT[entry.dealStatus]
-                  }`}
+                  className={`completed-row__status${tint ? ` completed-row__status--${tint}` : ""}`}
                 >
                   {DEAL_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>

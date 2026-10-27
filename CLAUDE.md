@@ -56,16 +56,17 @@ Two things in that seam are load-bearing:
 
 ### Views
 
-`AppShell` switches between three views with `activeView: ActiveView` (`"overview" | "inspector" |
-"database"`, the type declared in `components/Header.tsx`). The sidebar sets it.
+`AppShell` switches between four views with `activeView: ActiveView` (`"overview" | "inspector" |
+"database" | "admin"`, the type declared in `components/Header.tsx`). The sidebar sets it.
 
 **"overview" is the landing view.** Each view is mounted on first visit and then kept mounted, hidden
 with `u-hide` rather than unmounted, so its subscriptions and scroll position survive a switch — see
-`hasVisitedOverview` / `hasVisitedDatabase`. Per-view scroll offsets live in the `scrollPositions` ref.
+`hasVisitedOverview` / `hasVisitedDatabase` / `hasVisitedAdmin`. Per-view scroll offsets live in the
+`scrollPositions` ref.
 
-`Header` renders *outside* that toggle and is gated on `activeView !== "overview"`: it is the open
+`Header` renders *outside* that toggle and is hidden on `"overview"` and `"admin"`: it is the open
 document's toolbar (file loader, filename, Share, Export, counts) and has nothing to say on the
-dashboard.
+dashboard or on the Admin tab.
 
 ### State
 
@@ -109,8 +110,8 @@ The dashboard holds its own state in `components/OverviewView.tsx` rather than i
 
 - **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com`, enforced
   in `signInWithGoogle`.
-- **RTDB**: five top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
-  `/archivedProjects` (plus `/rfpDatabase` for the unrelated RFP search view).
+- **RTDB**: six top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
+  `/archivedProjects`, `/admins` (plus `/rfpDatabase` for the unrelated RFP search view).
 
 **A project's session id is its saved-file id.** `sessions/<id>` and `savedFiles/<id>` share a key, so
 opening the same project always joins the same room instead of minting a new one. `ensureSession` seeds
@@ -445,9 +446,12 @@ loading a document to work it out is what the bandwidth rule above forbids.
 
 ### Team bank
 
-`/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project; any
-authenticated `@canonical.com` user can add or remove. `ensureTeamMember` writes an entry on first
-sign-in. `lib/teamBank.ts` also has `subscribeToTeamMembers` and `removeTeamMember`.
+`/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project.
+`ensureTeamMember` writes an entry on first sign-in (and fills in a missing `photoURL` on a later one,
+for an entry an admin added by hand). Adding someone else (`addTeamMember`) and removing anyone
+(`removeUserFromTool` in `lib/admins.ts`) are **admin-only** — see Admin power below. Note that removing
+is not a ban: sign-in is open to every `@canonical.com` account, and a removed person who signs in
+again is written straight back by `ensureTeamMember`.
 
 Pass `teamMembers` down from `AppShell` rather than subscribing again in a new component.
 
@@ -473,6 +477,50 @@ userEmail && teamMembers.length === 0`) separates them, and an empty bank is the
 assigned to you" line, because a project waiting on its overlays is indistinguishable from one nobody
 is assigned to: saying "nothing" early is not a slower right answer, it is the wrong one. The list also
 names the person it belongs to, so a wrong identity is visible rather than plausible.
+
+### Admin power
+
+`/admins/<TeamMember.id>` → `{ grantedAt, grantedBy, grantedByEmail }`, subscribed once in `AppShell`
+(`admins`, `null` until the first snapshot) and reduced to `isAdmin = Boolean(me && admins?.[me.id])`,
+which is passed to every view holding a gated control. Like `myMemberId`, it is false until both the
+bank and the map have arrived, so gated controls start disabled and enable a moment later.
+
+**Admin-only:** removing a project (the Projects dropdown's Remove, Export's *Export and remove*, the
+Admin tab), adding people to the tool, removing people from it (Manage Users and the Admin tab), and
+granting or revoking admin. A non-admin still sees every one of those controls, **disabled, with
+`ADMIN_ONLY_HINT` as its `title`** — the same disabled-plus-title convention as the approve button.
+Not gated, deliberately: `ProjectTeamPanel`'s Remove (it unassigns from one project, nothing is
+deleted) and the snap handoff's *Discard batch* (the uploader backing out of their own upload).
+
+**Unlike the approve and owner gates, this one is enforced in `database.rules.json`.** A rule can
+rebuild the caller's bank key from `auth.token.email` with chained `.replace()`s mirroring
+`sanitizeEmailKey`, and look it up under `/admins`. So: `/admins/$memberId` is writable only by an
+admin; `/teamMembers/$memberId` only by its owner or an admin; and a `/savedFiles/$fileId` or
+`/savedFileData/$fileId` *deletion* only by an admin or the record's `uploadedByEmail` (which is what
+keeps Discard batch working for a non-admin). Writes that leave the node in place are unchanged. **If
+`sanitizeEmailKey` ever changes, the rules' replace chain has to change with it**, or nobody's key
+matches and every admin check fails.
+
+**There is no in-app bootstrap.** Only admins can write `/admins`, and only admins can see the Admin
+tab, so if `/admins` is ever empty it has to be seeded from the Firebase CLI, which bypasses the rules
+(`firebase database:set /admins/<TeamMember.id> …`). The first admin was seeded that way. The Admin tab
+refuses to let the last admin revoke themselves, or anyone remove themselves, so this should only be
+needed after a manual edit in the console.
+
+`removeUserFromTool` deletes the bank entry and the admin grant in one multi-path `update`, then runs
+`revertAssignmentsForMember`. The grant has to go too: it is keyed by the same id, which
+`ensureTeamMember` restores on the person's next sign-in, so a leftover grant would hand a removed
+person their admin power back on arrival.
+
+**The Admin tab (`AdminView`) is for admins only.** The sidebar entry is rendered only while `isAdmin`,
+and `AppShell` renders `AdminView` only while `isAdmin` too — admin power arrives live and can be
+revoked with the tab open, so the page is replaced by a "no longer have admin access" notice rather
+than left showing controls the rules would now refuse. Nothing inside `AdminView` is gated on admin
+power for that reason; only admins acting on themselves are. Its permissions table (`PERMISSIONS`) is **descriptive, not configuration** — each
+admin-only row is a gated control plus a rule, so changing one without the others makes it wrong. The
+two confirmations it shares with older surfaces are their own components, so both say and do the same
+thing: `RemoveUserDialog` (with Manage Users) and `RemoveProjectDialog` (with the Projects dropdown,
+including its Export-and-remove sequence).
 
 `lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans every room under
 `/sessions` and clears any `sectionAssignees`/`sectionReviewers` entry pointing at the removed member,
@@ -533,13 +581,26 @@ and unlike `savedFiles` the archive is never pruned. Split, the list reads `inde
 forever; a document is fetched (`getArchivedPayload`) only when someone asks to re-download it. Both
 halves are written in one multi-path `update`, so an entry cannot be listed without its payload.
 
+**The completed list holds one row per filename.** An entry is keyed by its project, but
+export-and-remove followed by a re-upload of the same file exports from a *new* project id, so
+`archiveProject` reuses the newest entry already holding that filename (`entriesForFilename`): time,
+exporter, payload and `sourceSessionId` move to the new export, `dealStatus` stays. **Only the newest
+version is kept** — any other entry with the name is deleted (index and payload) in the same atomic
+`update`, its deal outcome carried over if the kept one has none. A same-project re-export needs none
+of this: the entry is keyed by the project, so it is overwritten in place. Duplicates written before
+this are only cleaned up by the next export of that name, so `listArchivedProjects` still collapses
+same-named entries on read (newest wins, borrowing an older one's outcome if the newest has none).
+
 The completed list enumerates the archive, **not `/sessions`** — `/sessions` keeps a node per document
 ever opened and never sheds one, so listing it would show every abandoned project as finished.
 
-**Each entry carries a reported deal outcome: `dealStatus: "won" | "lost" | "pending"`**, written by the
-`<select>` on its row through `setDealStatus`. A missing child reads as `"pending"` — "nobody has said
-yet" is exactly what pending means — so there is nothing to migrate and no entry without a status.
-`toDealStatus` also folds an *unrecognised* value to pending rather than trusting it into the type.
+**Each entry carries a reported deal outcome: `dealStatus: "submitted" | "won" | "lost" | "no-decision" |
+"no-bid"`**, labelled Submitted, Closed-Won, Closed-Lost, Closed-No-Decision and Closed-No-Bid, written by
+the `<select>` on its row through `setDealStatus`. A missing child reads as `"submitted"` — an exported
+RFX nobody has closed is submitted — so there is nothing to migrate and no entry without a status.
+`toDealStatus` also folds an *unrecognised* value to submitted rather than trusting it into the type,
+which is what absorbs the earlier build's `"pending"`; `"won"`/`"lost"` kept their stored values for the
+same reason.
 
 **`archiveProject` writes the index entry one field per path, and that is load-bearing.** An `update`
 whose value is a whole object replaces that child, and because an entry is keyed by project, a
@@ -580,8 +641,9 @@ The status `<select>` is typed `select.completed-row__status` (0,1,1), not on th
 metric it sets is one Vanilla already sets on a bare `select` (0,1,0), and the background is restated at
 `select:hover` (0,1,1), which a single class would lose to on hover. Only `background-color` is
 touched, never `background` — the chevron is a `background-image` on the same element and the shorthand
-would take it with it. The three tints are the app's own `positive` / `negative` / `caution`, so a
-colour means the same thing here as on a question card; `information` (blue) is deliberately unused, as
+would take it with it. The three tints are the app's own `positive` / `negative` / `caution` (won, lost,
+submitted; no-decision and no-bid stay untinted), so a colour means the same thing here as on a
+question card; `information` (blue) is deliberately unused, as
 it reads "in progress" and a finished project's deal is not.
 
 ### Static export constraint
@@ -597,17 +659,16 @@ page.tsx
 └── AuthGate — Firebase auth state listener
     ├── LoginScreen
     └── AppShell (document state, view switching)
-        ├── Sidebar — Overview / Collaborative UI / RFP Database, dark mode, user, sign out
-        ├── Header — hidden on Overview
+        ├── Sidebar — Overview / Collaborative UI / RFP Database / Admin (admins only), dark mode, user, sign out
+        ├── Header — hidden on Overview and Admin
         │   ├── ProjectTeamPanel — "Manage Team Members": the open project's roster, add/remove,
         │   │                      writes sessions/<id>/projectAssignees (NOT the global bank)
-        │   ├── FileLoader — upload or pick a saved project; remove
+        │   ├── FileLoader — upload or pick a saved project; remove (admin-only, RemoveProjectDialog)
         │   ├── ShareButton — copies the ?doc= link
-        │   ├── ExportButton — CSV, archive, optional export-and-remove
+        │   ├── ExportButton — CSV, archive, optional export-and-remove (admin-only)
         ├── OverviewView — the dashboard (own state; metadata + overlay subscriptions)
-        │   ├── ManageUsersPanel — "Manage Users": the global team bank, add/remove people from the
-        │   │                       tool itself. Moved here from the header; removing runs
-        │   │                       removeTeamMember + revertAssignmentsForMember
+        │   ├── ManageUsersPanel — "Manage Users": the global team bank. Remove is admin-only and
+        │   │                       runs RemoveUserDialog → removeUserFromTool
         │   ├── ModeToggle ×1 — All projects / My assignments (underline tabs, brand bar)
         │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, average rating, archived; one row
         │   ├── [sort / owner / status controls, Cards/List ModeToggle, bulk-assign bar]
@@ -630,7 +691,9 @@ page.tsx
         │       ├── CopyButton, StarRating
         │       ├── [expansion] — owned by AppShell (expandedIds), remembered per doc
         │       └── [Approve / Withdraw approval] — the only writer of itemStatus
-        └── RfpDatabaseView — unrelated RFP search over /rfpDatabase
+        ├── RfpDatabaseView — unrelated RFP search over /rfpDatabase
+        └── AdminView — users (add, make/revoke admin, remove), projects (remove), permissions table;
+                        admins only — the sidebar hides the tab from everyone else
 ```
 
 ### Vanilla Framework & dark mode
@@ -708,16 +771,21 @@ Required `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`):
 Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel project config (`.vercel/`).
 
 `database.rules.json` defines RTDB access rules for `/sessions`, `/teamMembers`, `/savedFiles`,
-`/savedFileData`, `/rfpDatabase` and `/archivedProjects` — all restricted to authenticated
-`@canonical.com` users — and `firebase.json` points the `database` deploy target at it.
+`/savedFileData`, `/rfpDatabase`, `/archivedProjects` and `/admins` — all restricted to authenticated
+`@canonical.com` users, with the admin-only writes described under Admin power — and `firebase.json`
+points the `database` deploy target at it. `firebase deploy --only database --dry-run` checks the rules
+compile without deploying them.
 
 **Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
 access to the `canonical-req-8605` Firebase project.
 
-Two nodes are new and both fail closed until that deploy lands:
+Three nodes are new and all fail closed until that deploy lands:
 
 - `/savedFileData` — **deploy before shipping this build.** Documents live here, so without the rule
   every upload is rejected outright (the multi-path write is atomic, so nothing is half-saved and the
   loader reports it), and opening an already-migrated project finds no document.
 - `/archivedProjects` — archive writes are rejected, so exports download their CSV but the completed
   list stays empty and says so.
+- `/admins` — the read is refused, so nobody is an admin: every admin-only control stays disabled and
+  the Admin tab is hidden from everyone (the refusal is logged to the console). Deploy the rules and this build together: the old
+  rules let anyone remove anything, and the new UI alone would only *look* locked.

@@ -243,11 +243,15 @@ export interface ProjectSummary {
 /**
  * Where a completed project's deal ended up, reported by hand after the export.
  *
- * `"pending"` is the default rather than a stored value: an entry written before this existed, or one
- * nobody has reported on yet, has no `dealStatus` child at all, and "nobody has said yet" is exactly
- * what pending means. So there is nothing to migrate and no such thing as an entry with no status.
+ * `"submitted"` is the default rather than a stored value: an entry written before this existed, or one
+ * nobody has reported on yet, has no `dealStatus` child at all — and an exported RFX that nobody has
+ * closed is, by definition, submitted. The four others are the ways one closes. So there is nothing to
+ * migrate and no such thing as an entry with no status.
+ *
+ * `"won"` and `"lost"` keep the values an earlier build stored, so outcomes reported then still read.
+ * That build's `"pending"` is folded into `"submitted"` on read (`toDealStatus`).
  */
-export type DealStatus = "won" | "lost" | "pending";
+export type DealStatus = "submitted" | "won" | "lost" | "no-decision" | "no-bid";
 
 export interface ArchivedProjectMeta {
   id: string;
@@ -258,7 +262,7 @@ export interface ArchivedProjectMeta {
   itemCount: number;
   /** The `savedFiles` id this was exported from. May no longer exist. */
   sourceSessionId: string;
-  /** Always resolved — `listArchivedProjects` defaults a missing child to `"pending"`. */
+  /** Always resolved — `listArchivedProjects` defaults a missing child to `"submitted"`. */
   dealStatus: DealStatus;
 }
 

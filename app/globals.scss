@@ -260,6 +260,14 @@
   // sidebar's 100.
   z-index: 40;
   width: 20rem;
+  // Capped like the Projects dropdown (`.file-loader__panel`), with only the list scrolling. Uncapped,
+  // a long bank ran the panel past the bottom of the window, which made the page tall enough to grow a
+  // scrollbar — and the scrollbar's width shoved every right-aligned button in this row 16px left
+  // whenever the panel opened. 66vh from just under the header always ends inside the window.
+  max-height: 66vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .filter-bar__add-member {
@@ -1365,6 +1373,17 @@
   gap: 0.5rem;
 }
 
+// Every dropdown trigger here is a button followed by its panel, and Vanilla gives a button a 1rem
+// right margin unless it is `:last-child`. So the moment a panel opened, its trigger stopped being the
+// last child, gained the margin, and every right-aligned button in the row slid 16px left — and back
+// again on close. Zeroed on the trigger itself (0,1,1 beats Vanilla's single class); the wrappers'
+// own `gap` is the spacing.
+.file-loader > button,
+.header-manage-users > button,
+.manage-users > button {
+  margin-right: 0;
+}
+
 .file-loader__button {
   display: inline-flex;
   align-items: center;
@@ -1403,7 +1422,9 @@
   flex-shrink: 0;
 }
 
-.file-loader__saved-list {
+// Also the Manage Users list, so the two dropdowns scroll alike.
+.file-loader__saved-list,
+.manage-users__list {
   flex: 1 1 auto;
   // Without this a flex child refuses to shrink below its content height, so the panel would grow
   // past max-height instead of scrolling.
@@ -1607,7 +1628,10 @@ $card-field-height: 1.75rem;
 // Reset once here, for spans only: an actual paragraph in this view still wants its spacing, and
 // `span` keeps this from touching one. `.overview` plus the element selector clears the 0,1,0 of
 // `.p-text--small` without needing `!important`.
-.overview span.p-text--small {
+// The Admin tab shares it: its panel counts are the same `span.p-text--small` chips, and without the
+// reset they sat half a line above the heading they belong to.
+.overview span.p-text--small,
+.admin span.p-text--small {
   margin-bottom: 0;
   padding-top: 0;
 }
@@ -2306,6 +2330,26 @@ $card-field-height: 1.75rem;
   &.is-empty > i {
     opacity: 0.4;
   }
+
+  // Exported: a bare icon button that jumps to the completed list. Vanilla styles a bare `button`,
+  // so its chrome is stripped back to the icon.
+  &.is-link {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+
+    &:hover > i {
+      opacity: 0.7;
+    }
+  }
+}
+
+// Leave a little room above the completed list when an exported card scrolls to it.
+.overview__completed-anchor {
+  scroll-margin-top: 1rem;
 }
 
 .project-card__actions {
@@ -2540,7 +2584,7 @@ $card-field-height: 1.75rem;
   --completed-col-questions: 7.5rem;
   --completed-col-by: 9rem;
   --completed-col-date: 11rem;
-  --completed-col-status: 8.5rem;
+  --completed-col-status: 11.5rem;
   --completed-col-action: 10rem;
 
   margin-top: 2.5rem;
@@ -2833,4 +2877,237 @@ select.completed-row__status {
 // scanned without reading every icon.
 .team-member-select__option.is-selected {
   background-color: var(--vf-color-background-information-default);
+}
+
+/* ── Admin tab ── */
+
+// Same width as the dashboard: the two-column layout below needs it, and at the narrower `.app-main`
+// default the users column would leave each row's actions no room.
+.admin {
+  max-width: 80rem;
+}
+
+.admin__head {
+  margin-bottom: 1.5rem;
+}
+
+// Projects on the left, users and the permissions table stacked on the right, sharing the width
+// evenly. (Was 3fr / 2fr; the right-hand column was widened by 1.25x, which comes out at half.) One
+// column once there is no room for two.
+.admin__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 70rem) {
+  .admin__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  // Stacked, there is no column beside it to match, so the list goes back to sizing itself.
+  .admin__panel-body {
+    min-height: 0;
+
+    > .admin__list {
+      position: static;
+      max-height: 34rem;
+    }
+  }
+}
+
+.admin__side {
+  display: grid;
+  gap: 1.5rem;
+}
+
+// Projects runs the full height of the column beside it: its top level with Users, its bottom level
+// with Roles & permissions. Stretched to the grid row, which the right-hand column sizes — the projects
+// list is taken out of flow (below) so it cannot make the row any taller, and scrolls inside whatever
+// height that leaves instead.
+.admin__panel--projects {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin__panel-body {
+  position: relative;
+  flex: 1 1 auto;
+  // Enough to show a few rows when the right-hand column happens to be short.
+  min-height: 12rem;
+
+  > .admin__list {
+    position: absolute;
+    inset: 0;
+    max-height: none;
+  }
+}
+
+// The grid owns the spacing; Vanilla's card margin would double it.
+.admin__panel.p-card {
+  margin-bottom: 0;
+}
+
+.admin__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin__panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0;
+  padding-top: 0;
+}
+
+// Title, Add user, then the search taking whatever the line has left — one row in the narrow column.
+// The box is Vanilla's `.p-search-box`, whose input is absolutely positioned across the wrapper, so
+// sizing the wrapper is what sizes the field.
+.admin__panel-head .admin__search {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+
+// Vanilla has no positive/negative *text* tokens; the border ones are what `.file-loader__error` uses.
+.admin__notice {
+  margin-bottom: 0.75rem;
+  color: var(--vf-color-border-positive);
+
+  &--error {
+    color: var(--vf-color-border-negative);
+  }
+}
+
+// Capped and scrolling, so a long bank does not push the projects column's height around or the page
+// into a scroll of its own.
+.admin__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 34rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  // The Projects dropdown's scrollbar (`.file-loader__saved-list`): thin, a high-contrast thumb on a
+  // transparent track rather than the platform's boxed default. The padding keeps it clear of the
+  // Remove buttons — it sits inside the scrollport, so the track lands to the right of it.
+  padding-right: 0.5rem;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vf-color-border-high-contrast) transparent;
+
+  // Always the height of the whole bank, capped where it starts scrolling, however many rows a search
+  // leaves — every row is `--admin-user-row` tall for exactly this reason.
+  &--users {
+    --admin-user-row: 4rem;
+    height: min(26rem, calc(var(--admin-user-rows, 1) * var(--admin-user-row)));
+    max-height: none;
+  }
+}
+
+.admin__list-empty {
+  padding: 0.5rem 0;
+}
+
+// Fixed tracks for the icon and actions, so the buttons line up down the list whatever the name
+// length — the same reason `.completed-row` is a grid.
+.admin-user,
+.admin-project {
+  display: grid;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--vf-color-border-low-contrast);
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+// A fixed height, so the list can be sized from a row count — see `.admin__list--users`.
+.admin-user {
+  box-sizing: border-box;
+  height: var(--admin-user-row);
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+}
+
+.admin-project {
+  grid-template-columns: 1rem minmax(0, 1fr) 1rem auto;
+}
+
+.admin-user__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.admin-user__name-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+// A compact `.section-header__block`, small enough to sit on a line of body text.
+.admin-user__badge.section-header__block {
+  flex: none;
+  height: 1.125rem;
+  padding: 0 0.375rem;
+  font-size: 0.75rem;
+}
+
+.admin-user__name,
+.admin-user__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user__email {
+  font-size: 0.8125rem;
+}
+
+.admin-user__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 40rem) {
+  // The actions wrap under the name here, so rows are no longer one height and the list goes back to
+  // sizing itself.
+  .admin__list--users {
+    height: auto;
+    max-height: 26rem;
+  }
+
+  .admin-user {
+    height: auto;
+  }
+
+  .admin-user__actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.admin__permissions {
+  font-size: 0.875rem;
+
+  th,
+  td {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+}
+
+.admin__permissions-col {
+  width: 4.5rem;
+  text-align: center;
 }
