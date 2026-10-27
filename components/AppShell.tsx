@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import type { ActiveView } from "@/components/Header";
 import RfpDatabaseView from "@/components/RfpDatabaseView";
+import AdminView from "@/components/AdminView";
 import OverviewView from "@/components/OverviewView";
 import NewProjectModal, { type NewProjectValues } from "@/components/NewProjectModal";
 import FilterBar from "@/components/FilterBar";
@@ -37,6 +38,7 @@ import { ownerIdsFrom } from "@/lib/projects";
 import { getSavedFile, removeSavedFile, renameSavedFile, setDueDate } from "@/lib/savedFiles";
 import { createProject, readJsonFile } from "@/lib/newProject";
 import { findMemberByEmail, subscribeToTeamMembers } from "@/lib/teamBank";
+import { subscribeToAdmins, type AdminGrant } from "@/lib/admins";
 import {
   claimEditing,
   livePresence,
@@ -206,6 +208,9 @@ export default function AppShell({
     () => initialState?.projectAssignees ?? {}
   );
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  // Who holds admin power, keyed by `TeamMember.id`. See `lib/admins.ts`. Null until the first snapshot,
+  // so the Admin tab can tell "nobody is an admin yet" from "not loaded yet".
+  const [admins, setAdmins] = useState<Record<string, AdminGrant> | null>(null);
   // Which cards are expanded and which sections are collapsed. Held here rather than inside each
   // card or section so it survives the remount a doc switch or a filter change causes, and so it
   // can be restored for the doc being opened.
@@ -229,6 +234,7 @@ export default function AppShell({
     initialState ? "inspector" : "overview"
   );
   const [hasVisitedDatabase, setHasVisitedDatabase] = useState(false);
+  const [hasVisitedAdmin, setHasVisitedAdmin] = useState(false);
   // Tracks the mount-once rule below, so it starts true only when the dashboard is the landing view.
   // Starting it unconditionally true mounted `OverviewView` — and issued its project-list read — even
   // for a mount that goes straight to the inspector and may never show the dashboard at all.
@@ -344,6 +350,7 @@ export default function AppShell({
     overview: 0,
     inspector: 0,
     database: 0,
+    admin: 0,
   });
 
   // The previous view is read from state rather than from a `setActiveView` updater. React treats
@@ -362,6 +369,7 @@ export default function AppShell({
       // inspector, which is always mounted — so an effect was a second render's worth of work to
       // learn what this call already knows.
       if (view === "database") setHasVisitedDatabase(true);
+      if (view === "admin") setHasVisitedAdmin(true);
       if (view === "overview") setHasVisitedOverview(true);
       setActiveView(view);
     },
@@ -394,6 +402,13 @@ export default function AppShell({
     return subscribeToTeamMembers(setTeamMembers);
   }, []);
 
+  // Subscribed here rather than in the Admin tab, because the gated buttons live in every view.
+  useEffect(() => {
+    // A refused read — most likely the rules introducing `/admins` are not deployed — leaves everyone a
+    // non-admin, which fails closed: the Admin tab stays hidden and every gated control disabled.
+    return subscribeToAdmins(setAdmins, (error) => console.error("Admins could not be loaded:", error));
+  }, []);
+
   /**
    * The signed-in user's team-bank entry, or null before it arrives (or if they are not in the bank).
    *
@@ -402,6 +417,13 @@ export default function AppShell({
    * same `find` in each of the two views, and two places for "which member am I" is one too many.
    */
   const me = useMemo(() => findMemberByEmail(teamMembers, userEmail), [teamMembers, userEmail]);
+
+  /**
+   * Whether the signed-in user holds admin power. False until both the team bank and the admins map
+   * have arrived, so gated controls start disabled and enable a moment later rather than the reverse —
+   * the same order `myMemberId` gives the approve button.
+   */
+  const isAdmin = Boolean(me && admins?.[me.id]);
 
   /**
    * Who this project's sections may be handed to: its owners, and nobody else.
@@ -1335,13 +1357,15 @@ export default function AppShell({
         darkMode={darkMode}
         onToggleDark={toggleDark}
         onSignOut={onSignOut}
+        showAdmin={isAdmin}
       />
 
       <div className="app-content">
         {/* The header is the open document's toolbar — file loader, filename, share, export, counts —
-            so it has nothing to say on the dashboard, which is about the projects you have not opened.
-            It renders outside the view toggle, so it is gated here rather than hidden by a class. */}
-        {activeView !== "overview" && (
+            so it has nothing to say on the dashboard, which is about the projects you have not opened,
+            or on the Admin tab, which is about the tool rather than any one document. It renders
+            outside the view toggle, so it is gated here rather than hidden by a class. */}
+        {activeView !== "overview" && activeView !== "admin" && (
           <Header
             data={data}
             filename={filename}
@@ -1361,6 +1385,7 @@ export default function AppShell({
             onDocRemoved={handleDocRemoved}
             onExported={handleExported}
             onNewProject={handleNewProject}
+            isAdmin={isAdmin}
           />
         )}
 
@@ -1374,6 +1399,7 @@ export default function AppShell({
               openingProjectId={openingProjectId}
               onError={showError}
               refreshKey={overviewRefreshKey}
+              isAdmin={isAdmin}
             />
           </div>
         )}
@@ -1511,6 +1537,32 @@ export default function AppShell({
           // also true on the dashboard, which would have shown the database underneath it.
           <div className={activeView === "database" ? "" : "u-hide"}>
             <RfpDatabaseView />
+          </div>
+        )}
+
+        {/* Admins only — the sidebar does not offer the tab to anyone else. Gated here as well, because
+            admin power arrives live and can be revoked while the tab is open: the page is replaced
+            rather than left on screen with controls the rules will now refuse. */}
+        {hasVisitedAdmin && (
+          <div className={activeView === "admin" ? "" : "u-hide"}>
+            {isAdmin ? (
+              <AdminView
+                teamMembers={teamMembers}
+                admins={admins ?? {}}
+                me={me}
+                onError={showError}
+                onDocRemoved={handleDocRemoved}
+                onExported={handleExported}
+              />
+            ) : (
+              <main className="app-main">
+                <div className="empty-state">
+                  <i className="p-icon--lock-locked p-icon--xx-large"></i>
+                  <p className="p-heading--4">You no longer have admin access</p>
+                  <p className="u-text--muted">An admin can grant it again.</p>
+                </div>
+              </main>
+            )}
           </div>
         )}
       </div>

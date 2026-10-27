@@ -1,5 +1,6 @@
 "use client";
 
+import DueDateField from "./DueDateField";
 import TeamMemberMultiSelect from "./TeamMemberMultiSelect";
 import { STATUS_BANDS, isOverdue, ownerIdsOf } from "@/lib/projects";
 import type { ProjectStats, ProjectSummary, TeamMember } from "@/lib/types";
@@ -13,6 +14,7 @@ interface Props {
   onToggleSelected: (projectId: string) => void;
   onOpen: (projectId: string) => void;
   onChangeOwners: (projectId: string, memberIds: string[]) => void;
+  onChangeDueDate: (projectId: string, isoDate: string | null) => void;
 }
 
 /**
@@ -52,9 +54,10 @@ function ApprovedBar({ stats }: { stats: ProjectStats }) {
  * One project as a single line, for the dashboard's list view.
  *
  * Deliberately not a slimmed-down `ProjectCard`: it carries a different, smaller set of fields — name,
- * approved bar, the three status counts, owners — so that thirty projects can be read down a column.
- * Due date, uploader and export stamp are the card's to show; a row that carried everything would be
- * a card again, only narrower.
+ * approved bar, the three status counts, owners, due date — so that thirty projects can be read down a
+ * column. The wheel and the export stamp are the card's to show; a row that carried everything would be
+ * a card again, only narrower. The due date is here because it is editable, and a view that could not
+ * set one sent people back to the cards to do it.
  *
  * The grid template lives on `.project-list__row` rather than on the container, so every row lays out
  * against the same columns and the values line up down the page. That is the whole point of the view,
@@ -68,6 +71,7 @@ export default function ProjectListRow({
   onToggleSelected,
   onOpen,
   onChangeOwners,
+  onChangeDueDate,
 }: Props) {
   const { meta, overlays, stats } = project;
   const overdue = isOverdue(meta, stats);
@@ -108,24 +112,24 @@ export default function ProjectListRow({
       <ApprovedBar stats={stats} />
 
       {/* One cell per band, in `STATUS_BANDS` order, matching the three badge tracks in
-          `.project-list__row`. The wrapper is rendered even at zero so the cell survives: dropping the
-          element instead would let the next band's badge slide left out from under its heading, and the
-          alignment down the page is the only reason this view exists. */}
+          `.project-list__row`. Every band always draws its badge: a zero keeps its box and says 0, but
+          drops its tint and fades (`.section-header__block--zero`, as on the cards), so no cell is ever
+          empty and a zero reads as a count rather than as missing data. */}
       {STATUS_BANDS.map((band) => (
         <div key={band.key} className="project-list__badge">
-          {stats[band.key] > 0 && (
-            <span
-              className={`section-header__block section-header__block--band-${band.modifier}`}
-            >
-              {/* The count is boxed to three digits wide (see `.project-list__badge-count`) so every
-                  badge in a band draws at one width whatever the number. There is deliberately no
-                  space between the two spans: `.section-header__block` is an inline *flex* container,
-                  where a whitespace-only run between items is dropped, so the gap has to be a margin
-                  on the count rather than a text node. */}
-              <span className="project-list__badge-count">{stats[band.key]}</span>
-              <span>{band.short}</span>
-            </span>
-          )}
+          <span
+            className={`section-header__block ${
+              stats[band.key] > 0
+                ? `section-header__block--band-${band.modifier}`
+                : "section-header__block--zero"
+            }`}
+            title={`${stats[band.key]} ${band.label}`}
+          >
+            {/* Number only — the column heading already says which band it is, and dropping the
+                word is what makes room for the Due column. Still boxed to three digits (see
+                `.project-list__badge-count`) so every badge in a band is one width. */}
+            <span className="project-list__badge-count">{stats[band.key]}</span>
+          </span>
         </div>
       ))}
 
@@ -137,6 +141,12 @@ export default function ProjectListRow({
         emptyLabel="Assign"
         srName={`Team for ${meta.filename}`}
         compact
+      />
+
+      <DueDateField
+        value={meta.dueDate}
+        overdue={overdue}
+        onChange={(iso) => onChangeDueDate(meta.id, iso)}
       />
     </div>
   );

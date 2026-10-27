@@ -56,16 +56,17 @@ Two things in that seam are load-bearing:
 
 ### Views
 
-`AppShell` switches between three views with `activeView: ActiveView` (`"overview" | "inspector" |
-"database"`, the type declared in `components/Header.tsx`). The sidebar sets it.
+`AppShell` switches between four views with `activeView: ActiveView` (`"overview" | "inspector" |
+"database" | "admin"`, the type declared in `components/Header.tsx`). The sidebar sets it.
 
 **"overview" is the landing view.** Each view is mounted on first visit and then kept mounted, hidden
 with `u-hide` rather than unmounted, so its subscriptions and scroll position survive a switch — see
-`hasVisitedOverview` / `hasVisitedDatabase`. Per-view scroll offsets live in the `scrollPositions` ref.
+`hasVisitedOverview` / `hasVisitedDatabase` / `hasVisitedAdmin`. Per-view scroll offsets live in the
+`scrollPositions` ref.
 
-`Header` renders *outside* that toggle and is gated on `activeView !== "overview"`: it is the open
+`Header` renders *outside* that toggle and is hidden on `"overview"` and `"admin"`: it is the open
 document's toolbar (file loader, filename, Share, Export, counts) and has nothing to say on the
-dashboard.
+dashboard or on the Admin tab.
 
 ### State
 
@@ -111,8 +112,8 @@ The dashboard holds its own state in `components/OverviewView.tsx` rather than i
 
 - **Auth** (`lib/auth.ts`, `lib/firebase.ts`): Google Sign-In restricted to `@canonical.com`, enforced
   in `signInWithGoogle`.
-- **RTDB**: six top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
-  `/archivedProjects`, `/presence` (plus `/rfpDatabase` for the unrelated RFP search view).
+- **RTDB**: seven top-level nodes — `/savedFiles`, `/savedFileData`, `/sessions`, `/teamMembers`,
+  `/archivedProjects`, `/admins`, `/presence` (plus `/rfpDatabase` for the unrelated RFP search view).
 
 **A project's session id is its saved-file id.** `sessions/<id>` and `savedFiles/<id>` share a key, so
 opening the same project always joins the same room instead of minting a new one. `ensureSession` seeds
@@ -219,48 +220,48 @@ a control column whose width its halves have to share.
 cannot show different numbers in the two views. Persisted to `localStorage` under `overviewViewMode`,
 read in an effect rather than in the initial state because `output: 'export'` prerenders this component
 and a stored initial value would not match the prerendered HTML (`AppShell` loads dark mode the same
-way).
+way). **List is the default** for someone who has never picked; the effect only switches to cards when
+that is what is stored.
 
-The list is **not a slimmed-down card**. It carries name, an approved bar, the three status counts and
-owners, and deliberately drops the wheel, due date, uploader, export stamp and the Open button — the
-filename is the open target. A row that carried everything would be a card again, only narrower. So
-`ProjectListRow` takes no `onChangeDueDate`; due dates are edited in the card view.
+The list is **not a slimmed-down card**. It carries name, an approved bar, the three status counts,
+owners and the due date, and deliberately drops the wheel, export stamp and the Open button — the
+filename is the open target. A row that carried everything would be a card again, only narrower. The due
+date is the same `DueDateField` as the card's, through the same `onChangeDueDate`: a view that could not
+set one sent people back to the cards to do it.
 
 Its grid template lives on **`.project-list__row`, not on the container**, because each row needs its
 own border and selected/overdue state and `display: contents` would discard both. Repeating the template
 is what aligns the columns down the page, and it is why **no track is `auto`** — `auto` sizes itself per
 row and staggers the values. The widths are custom properties on `.project-list` — `--list-col-select`,
 `--list-col-name`, `--list-col-bar`, `--list-col-approved`, `--list-col-ready`, `--list-col-unanswered`,
-`--list-col-team` — so the header row, the project rows and the narrow-screen flex bases all read them
+`--list-col-team`, `--list-col-due` — so the header row, the project rows and the narrow-screen flex bases all read them
 from one place.
 
 **The name is the only elastic track** (`minmax(18rem, 1fr)`); every other one is fixed. That is what
-puts the whole right-hand group — bar, three bands, team — flush against the row's right edge instead of
+puts the whole right-hand group — bar, three bands, team, due — flush against the row's right edge instead of
 leaving dead space there, and the name is the right track to absorb it because its content ellipses
 anyway. Alignment down the page survives precisely because nothing else is elastic: **a second `1fr`
 would break it.**
 
 Note what that does and does not mean: the *group* of columns is anchored to the row's right edge, while
 the content of every column — heading and cell alike — reads from that column's own left edge. Both
-requested, and they are not in tension.
+requested, and they are not in tension. The exception is the three band columns, whose heading and
+number-only badge are both centred (`.project-list__band-head`, `.project-list__badge`), so the number
+sits under the middle of the word naming it.
 
 Two more consequences worth not undoing:
 
-- **Each status band owns a track**, and `ProjectListRow` renders a `.project-list__badge` wrapper for
-  every band whether or not its count is nonzero. A band at zero drops its badge and leaves the cell
-  empty; dropping the wrapper instead would let the bands after it slide left out from under their
-  headings. The three tracks are in `STATUS_BANDS` order, and the header row maps the same array — so
+- **Each status band owns a track**, and `ProjectListRow` renders a badge for every band whether or not
+  its count is nonzero. A band at zero keeps its badge and says `0`, untinted and faded
+  (`.section-header__block--zero`, as on the cards), so no cell is empty and the bands after it cannot
+  slide left out from under their headings. The three tracks are in `STATUS_BANDS` order, and the header row maps the same array — so
   reordering the array means reordering the three tracks in the SCSS with it.
-- **The count inside a badge is padded to three digits** (`.project-list__badge-count`: `min-width: 3ch`,
-  right-aligned, tabular figures), so every badge in a band draws at one width and the labels stop
-  staggering down the column — `1 Ready` is exactly as wide as `129 Ready`. `min-width`, not `width`, so a
-  fourth digit widens the tile instead of colliding with the label. The gap to the label is a **margin on
-  the count, not a space in the markup**: `.section-header__block` is an inline flex container, where a
-  whitespace-only run between two flex items is not rendered at all. In the list the badge also takes
-  `padding-right: 1.5rem` — scoped to `.project-list__badge`, since the section headers want the tighter
-  symmetric padding — so there is trailing room after the label to match the pad before the digits. The
-  three `--list-col-*` widths are sized for that padded badge, **so they move together with it**: widen the
-  padding without widening the tracks and the difference comes out of the label.
+- **A list badge is a number only** — the column heading names the band, and dropping the word is what
+  made room for the Due column. The count is padded to three digits (`.project-list__badge-count`:
+  `min-width: 3ch`, centred, tabular figures), so every badge in a band draws at one width — `1` is exactly
+  as wide as `129`. `min-width`, not `width`, so a fourth digit widens the tile. The band name and count
+  are on the badge's `title`. The three band tracks are sized for their *headings*, the widest thing in
+  each column.
 - **Nothing in the badge cell shrinks** (`.project-list__badge > * { flex: none }`). The cell is a flex
   container, so by default a track a shade too narrow does not overflow visibly — it compresses the badge
   and `white-space: nowrap` cuts the label off inside its own border, which reads as a broken style rather
@@ -271,8 +272,7 @@ Two more consequences worth not undoing:
   a grid item's automatic minimum size is its content, which would otherwise push past the track.
 
 Below `60rem` the row stops being a grid and becomes a wrapping flex row. Aligned columns are the first
-thing to go — the header is hidden there, so there is nothing to align under, and an empty badge slot
-would spend width the row no longer has. `.project-list__badge:empty { display: none }` collapses them.
+thing to go — the header is hidden there, so there is nothing to align under.
 
 Every `onValue` subscription in this codebase returns **`onValue`'s own unsubscribe**, never
 `off(path)` — `off` detaches every listener at that path and so takes down any overlapping
@@ -621,9 +621,16 @@ All of it is in `lib/presence.ts`. Things worth not undoing:
 
 ### Team bank
 
-`/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project; any
-authenticated `@canonical.com` user can add or remove. `ensureTeamMember` writes an entry on first
-sign-in. `lib/teamBank.ts` also has `subscribeToTeamMembers` and `removeTeamMember`.
+`/teamMembers/<sanitizedEmail>` → `{ name, email, photoURL, createdAt }`. Global, not per-project.
+`ensureTeamMember` writes an entry on first sign-in (and fills in a missing `photoURL` on a later one,
+for an entry an admin added by hand). Adding someone else (`addTeamMember`) and removing anyone
+(`removeUserFromTool` in `lib/admins.ts`) are **admin-only** — see Admin power below. `addTeamMember`
+lowercases the address before keying it, and the Admin tab checks `findMemberByEmail` first: the key is
+case-sensitive and Google reports addresses in lower case, so a hand-typed `Alice.Smith@…` would
+otherwise become a second entry the moment Alice signs in, stranding whatever was assigned to the
+first. Note that removing
+is not a ban: sign-in is open to every `@canonical.com` account, and a removed person who signs in
+again is written straight back by `ensureTeamMember`.
 
 Pass `teamMembers` down from `AppShell` rather than subscribing again in a new component.
 
@@ -649,6 +656,58 @@ userEmail && teamMembers.length === 0`) separates them, and an empty bank is the
 assigned to you" line, because a project waiting on its overlays is indistinguishable from one nobody
 is assigned to: saying "nothing" early is not a slower right answer, it is the wrong one. The list also
 names the person it belongs to, so a wrong identity is visible rather than plausible.
+
+### Admin power
+
+`/admins/<TeamMember.id>` → `{ grantedAt, grantedBy, grantedByEmail }`, subscribed once in `AppShell`
+(`admins`, `null` until the first snapshot) and reduced to `isAdmin = Boolean(me && admins?.[me.id])`,
+which is passed to every view holding a gated control. Like `myMemberId`, it is false until both the
+bank and the map have arrived, so gated controls start disabled and enable a moment later.
+
+**Admin-only:** removing a project (the Projects dropdown's Remove, Export's *Export and remove*, the
+Admin tab), adding people to the tool, removing people from it (Manage Users and the Admin tab), and
+granting or revoking admin. A non-admin still sees every one of those controls, **disabled, with
+`ADMIN_ONLY_HINT` as its `title`** — the same disabled-plus-title convention as the approve button.
+Not gated, deliberately: `ProjectTeamPanel`'s Remove (it unassigns from one project, nothing is
+deleted) and the snap handoff's *Discard batch* (the uploader backing out of their own upload).
+
+**Unlike the approve and owner gates, this one is enforced in `database.rules.json`.** A rule can
+rebuild the caller's bank key from `auth.token.email` with chained `.replace()`s mirroring
+`sanitizeEmailKey`, and look it up under `/admins`. So: `/admins/$memberId` is writable only by an
+admin; `/teamMembers/$memberId` only by its owner or an admin; and a `/savedFiles/$fileId` or
+`/savedFileData/$fileId` *deletion* only by an admin or the record's `uploadedByEmail` (which is what
+keeps Discard batch working for a non-admin). For a non-admin, a write that leaves a `/savedFiles`
+record in place must also leave its `uploadedByEmail` as it was — otherwise "uploader" is something
+anyone could become one write before deleting. Every app writer keeps the field (`updateExistingDoc`
+copies the record, the migration writes per field). Not covered, and no worse than before this rule
+existed: a non-admin can still overwrite a record's other fields or a stored document. **If
+`sanitizeEmailKey` ever changes, the rules' replace chain has to change with it**, or nobody's key
+matches and every admin check fails.
+
+**There is no in-app bootstrap.** Only admins can write `/admins`, and only admins can see the Admin
+tab, so if `/admins` is ever empty it has to be seeded from the Firebase CLI, which bypasses the rules
+(`firebase database:set /admins/<TeamMember.id> …`). The first admin was seeded that way. The Admin tab
+refuses to let the last admin revoke themselves, and neither it nor the dashboard's Manage Users lets
+anyone remove themselves, so this should only be needed after a manual edit in the console. "Last"
+counts grants held by people in the bank, not every key under `/admins`, so a stray grant matching
+nobody cannot stand in for a real admin.
+
+`removeUserFromTool` deletes the bank entry and the admin grant in one multi-path `update`, then runs
+`revertAssignmentsForMember`. The grant has to go too: it is keyed by the same id, which
+`ensureTeamMember` restores on the person's next sign-in, so a leftover grant would hand a removed
+person their admin power back on arrival. It throws only if that removal is refused; the assignment
+scan can fail separately after it has landed, and comes back as `assignmentsCleared: false` so the
+dialog says "removed, but not from every section" rather than the untrue "not removed".
+
+**The Admin tab (`AdminView`) is for admins only.** The sidebar entry is rendered only while `isAdmin`,
+and `AppShell` renders `AdminView` only while `isAdmin` too — admin power arrives live and can be
+revoked with the tab open, so the page is replaced by a "no longer have admin access" notice rather
+than left showing controls the rules would now refuse. Nothing inside `AdminView` is gated on admin
+power for that reason; only admins acting on themselves are. Its permissions table (`PERMISSIONS`) is **descriptive, not configuration** — each
+admin-only row is a gated control plus a rule, so changing one without the others makes it wrong. The
+two confirmations it shares with older surfaces are their own components, so both say and do the same
+thing: `RemoveUserDialog` (with Manage Users) and `RemoveProjectDialog` (with the Projects dropdown,
+including its Export-and-remove sequence).
 
 `lib/session.ts` also exports `revertAssignmentsForMember(memberId)`, which scans every room under
 `/sessions` and clears any `sectionAssignees`/`sectionReviewers` entry pointing at the removed member,
@@ -709,13 +768,28 @@ and unlike `savedFiles` the archive is never pruned. Split, the list reads `inde
 forever; a document is fetched (`getArchivedPayload`) only when someone asks to re-download it. Both
 halves are written in one multi-path `update`, so an entry cannot be listed without its payload.
 
+**The completed list holds one row per filename.** An entry is keyed by its project, but
+export-and-remove followed by a re-upload of the same file exports from a *new* project id, so
+`archiveProject` reuses the newest entry already holding that filename (`entriesForFilename`): time,
+exporter, payload and `sourceSessionId` move to the new export, `dealStatus` stays. **Only the newest
+version is kept** — any other entry with the name is deleted (index and payload) in the same atomic
+`update`, its deal outcome carried over if the kept one has none. "Has one" means the `dealStatus`
+child exists at all: an explicit Submitted is a report, so setting a deal back to Submitted is not
+overridden by an older duplicate's Closed-Won. A same-project re-export needs none
+of this: the entry is keyed by the project, so it is overwritten in place. Duplicates written before
+this are only cleaned up by the next export of that name, so `listArchivedProjects` still collapses
+same-named entries on read (newest wins, borrowing an older one's outcome if the newest has none).
+
 The completed list enumerates the archive, **not `/sessions`** — `/sessions` keeps a node per document
 ever opened and never sheds one, so listing it would show every abandoned project as finished.
 
-**Each entry carries a reported deal outcome: `dealStatus: "won" | "lost" | "pending"`**, written by the
-`<select>` on its row through `setDealStatus`. A missing child reads as `"pending"` — "nobody has said
-yet" is exactly what pending means — so there is nothing to migrate and no entry without a status.
-`toDealStatus` also folds an *unrecognised* value to pending rather than trusting it into the type.
+**Each entry carries a reported deal outcome: `dealStatus: "submitted" | "won" | "lost" | "no-decision" |
+"no-bid"`**, labelled Submitted, Closed-Won, Closed-Lost, Closed-No-Decision and Closed-No-Bid, written by
+the `<select>` on its row through `setDealStatus`. A missing child reads as `"submitted"` — an exported
+RFX nobody has closed is submitted — so there is nothing to migrate and no entry without a status.
+`toDealStatus` also folds an *unrecognised* value to submitted rather than trusting it into the type,
+which is what absorbs the earlier build's `"pending"`; `"won"`/`"lost"` kept their stored values for the
+same reason.
 
 **`archiveProject` writes the index entry one field per path, and that is load-bearing.** An `update`
 whose value is a whole object replaces that child, and because an entry is keyed by project, a
@@ -756,8 +830,9 @@ The status `<select>` is typed `select.completed-row__status` (0,1,1), not on th
 metric it sets is one Vanilla already sets on a bare `select` (0,1,0), and the background is restated at
 `select:hover` (0,1,1), which a single class would lose to on hover. Only `background-color` is
 touched, never `background` — the chevron is a `background-image` on the same element and the shorthand
-would take it with it. The three tints are the app's own `positive` / `negative` / `caution`, so a
-colour means the same thing here as on a question card; `information` (blue) is deliberately unused, as
+would take it with it. The three tints are the app's own `positive` / `negative` / `caution` (won, lost,
+submitted; no-decision and no-bid stay untinted), so a colour means the same thing here as on a
+question card; `information` (blue) is deliberately unused, as
 it reads "in progress" and a finished project's deal is not.
 
 ### Static export constraint
@@ -773,19 +848,18 @@ page.tsx
 └── AuthGate — Firebase auth state listener
     ├── LoginScreen
     └── AppShell (document state, view switching)
-        ├── Sidebar — Overview / Collaborative UI / RFP Database, dark mode, user, sign out
-        ├── Header — hidden on Overview
+        ├── Sidebar — Overview / Collaborative UI / RFP Database / Admin (admins only), dark mode, user, sign out
+        ├── Header — hidden on Overview and Admin
         │   ├── ProjectTeamPanel — "Manage Team Members": the open project's roster, add/remove,
         │   │                      writes sessions/<id>/projectAssignees (NOT the global bank)
-        │   ├── FileLoader — upload or pick a saved project; remove
+        │   ├── FileLoader — upload or pick a saved project; remove (admin-only, RemoveProjectDialog)
         │   ├── ShareButton — copies the ?doc= link
-        │   ├── ExportButton — CSV, archive, optional export-and-remove
+        │   ├── ExportButton — CSV, archive, optional export-and-remove (admin-only)
         ├── OverviewView — the dashboard (own state; metadata + overlay subscriptions)
-        │   ├── ManageUsersPanel — "Manage Users": the global team bank, add/remove people from the
-        │   │                       tool itself. Moved here from the header; removing runs
-        │   │                       removeTeamMember + revertAssignmentsForMember
+        │   ├── ManageUsersPanel — "Manage Users": the global team bank. Remove is admin-only and
+        │   │                       runs RemoveUserDialog → removeUserFromTool
         │   ├── ModeToggle ×1 — All projects / My assignments (underline tabs, brand bar)
-        │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, archived
+        │   ├── ProjectSummaryStrip — totals, in progress, approved, overdue, average rating, archived; one row
         │   ├── [sort / owner / status controls, Cards/List ModeToggle, bulk-assign bar]
         │   ├── ProjectCard (per active project, in a responsive grid — "cards" view)
         │   │   ├── ProgressWheel — three hoverable bands, custom SVG
@@ -806,7 +880,9 @@ page.tsx
         │       ├── CommentThread — per-question comments; resolve / reopen / delete
         │       ├── [expansion] — owned by AppShell (expandedIds), remembered per doc
         │       └── [Approve / Withdraw approval] — the only writer of itemStatus
-        └── RfpDatabaseView — unrelated RFP search over /rfpDatabase
+        ├── RfpDatabaseView — unrelated RFP search over /rfpDatabase
+        └── AdminView — users (add, make/revoke admin, remove), projects (remove), permissions table;
+                        admins only — the sidebar hides the tab from everyone else
 ```
 
 ### Vanilla Framework & dark mode
@@ -884,22 +960,33 @@ Required `NEXT_PUBLIC_FIREBASE_*` vars (see `.env.local.example`):
 Deployed to Firebase Hosting (`firebase.json`, `.firebaserc`). Also has a Vercel project config (`.vercel/`).
 
 `database.rules.json` defines RTDB access rules for `/sessions`, `/teamMembers`, `/savedFiles`,
-`/savedFileData`, `/rfpDatabase`, `/archivedProjects` and `/presence` — all restricted to authenticated
-`@canonical.com` users — and `firebase.json` points the `database` deploy target at it.
+`/savedFileData`, `/rfpDatabase`, `/archivedProjects`, `/admins` and `/presence` — all restricted to
+authenticated `@canonical.com` users, with the admin-only writes described under Admin power — and
+`firebase.json` points the `database` deploy target at it. `firebase deploy --only database --dry-run`
+checks the rules compile without deploying them.
 
 **Rule changes are not live until deployed.** Run `firebase deploy --only database`, which requires
 access to the `canonical-req-8605` Firebase project.
 
-All three of the nodes below are deployed as of 2026-10-26 (`/presence` last). What each did while its
+All four of the nodes below are deployed as of 2026-10-27 (`/presence` last). What each did while its
 rule was missing is kept because it is what a missing rule looks like, should one ever be dropped — and
 `/presence` is the one to suspect first, since its failure is silent: the lock simply never engaged,
 and that is how it went unnoticed. To compare the live rules with `database.rules.json`, read
 `<databaseURL>/.settings/rules.json` with the CLI's access token.
+
+**A rules deploy replaces the whole rule set**, so deploy only from a `database.rules.json` that holds
+every rule that is live. `/presence` went live on 2026-10-26, and the `/admins` deploy the same day was
+made from a branch that did not yet have it, which dropped it again until 2026-10-27 — the lock failing
+open, silently, in between. Read the live rules before deploying from anything but `master`.
 
 - `/savedFileData` — **deploy before shipping this build.** Documents live here, so without the rule
   every upload is rejected outright (the multi-path write is atomic, so nothing is half-saved and the
   loader reports it), and opening an already-migrated project finds no document.
 - `/archivedProjects` — archive writes are rejected, so exports download their CSV but the completed
   list stays empty and says so.
+- `/admins` — the read is refused, so nobody is an admin: every admin-only control stays disabled and
+  the Admin tab is hidden from everyone (the refusal is logged to the console). Deploy the rules and
+  this build together: the old rules let anyone remove anything, and the new UI alone would only *look*
+  locked.
 - `/presence` — every presence write and read is rejected, silently: nobody ever shows as editing, and
   the editor lock fails open, so simultaneous editing is possible again until the rule is live.

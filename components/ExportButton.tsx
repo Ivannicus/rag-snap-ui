@@ -4,6 +4,7 @@ import { useState } from "react";
 import { removeSavedFile } from "@/lib/savedFiles";
 import { csvFilenameFor } from "@/lib/csv";
 import { exportProject } from "@/lib/export";
+import { ADMIN_ONLY_HINT } from "@/lib/admins";
 import type { ParsedQAFile } from "@/lib/types";
 
 interface Props {
@@ -23,6 +24,11 @@ interface Props {
   onDocRemoved: (docId: string) => void;
   /** Called once an export has been archived, so the dashboard can re-read its lists. */
   onExported: () => void;
+  /**
+   * Export and remove takes the project out of the shared list, so it is admin-only. Plain Export is
+   * open to everyone.
+   */
+  isAdmin: boolean;
 }
 
 /**
@@ -46,6 +52,7 @@ export default function ExportButton({
   onError,
   onDocRemoved,
   onExported,
+  isAdmin,
 }: Props) {
   const [exported, setExported] = useState(false);
   const [stage, setStage] = useState<Stage>("closed");
@@ -155,16 +162,6 @@ export default function ExportButton({
         ) : (
           <>
             <i className="p-icon--export"></i> Export CSV
-            {(editCount > 0 || ratingCount > 0) && (
-              <span className="export-button__badge">
-                {[
-                  editCount > 0 && `${editCount} edit${editCount !== 1 ? "s" : ""}`,
-                  ratingCount > 0 && `${ratingCount} rating${ratingCount !== 1 ? "s" : ""}`,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
-              </span>
-            )}
           </>
         )}
       </button>
@@ -241,9 +238,11 @@ export default function ExportButton({
               </div>
             </div>
             <p className="u-text--muted p-text--small">
-              {docId
-                ? "Export and remove downloads the CSV and then takes this doc out of the shared list, so the team stops seeing docs nobody works on anymore. You will be asked to confirm before anything is removed."
-                : "This doc is not in the shared list, so there is nothing to remove."}
+              {!docId
+                ? "This doc is not in the shared list, so there is nothing to remove."
+                : isAdmin
+                  ? "Export and remove downloads the CSV and then takes this doc out of the shared list, so the team stops seeing docs nobody works on anymore. You will be asked to confirm before anything is removed."
+                  : "Export downloads the CSV and adds it to the completed list. Removing the doc from the shared list afterwards is for admins."}
             </p>
             <footer className="p-modal__footer">
               <button
@@ -256,6 +255,8 @@ export default function ExportButton({
                 <button
                   className="p-button--negative u-no-margin--bottom"
                   onClick={handleExportAndRemove}
+                  disabled={!isAdmin}
+                  title={isAdmin ? undefined : ADMIN_ONLY_HINT}
                 >
                   Export and remove
                 </button>

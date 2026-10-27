@@ -61,10 +61,37 @@ interface ArchiveInput {
  *
  * Ids stay collision-free after removal. Export-and-remove frees the `savedFiles` id, but the next
  * upload is a fresh `push` and never reuses it, so a later project cannot land on this entry.
+ *
+ * ## …unless the name is already in the archive
+ *
+ * Keying by project is not enough on its own: export-and-remove, then upload the same file again, and
+ * the second export comes from a *new* project id with the same name — which used to add a second row
+ * for what everyone reads as one finished project. So the newest entry already holding this filename is
+ * reused instead (`entriesForFilename`). Its time, exporter, payload and `sourceSessionId` move to this
+ * export; its `dealStatus` stays, for the same reason it survives a plain re-export below.
+ *
+ * Only the newest version is kept. Any *other* entry holding the name — left by builds that did not
+ * reuse one — is deleted, index and payload both, in the same atomic `update` that writes this export,
+ * so the archive never holds an older copy of a project alongside the one shown. If the reused entry is
+ * no reported deal outcome and a deleted one has one, the outcome is carried over rather than lost with
+ * it. "Reported" means the child exists at all — an explicit Submitted is a report too, so somebody
+ * setting a deal back to Submitted is not overridden by an older duplicate's Closed-Won.
  */
 export async function archiveProject(input: ArchiveInput): Promise<string> {
-  const id = input.sourceSessionId;
+  const [newest, ...stale] = await entriesForFilename(input.filename);
+  const id = newest?.id ?? input.sourceSessionId;
   const exportedAt = Date.now();
+
+  const cleanup: Record<string, unknown> = {};
+  for (const entry of stale) {
+    cleanup[`index/${entry.id}`] = null;
+    cleanup[`payloads/${entry.id}`] = null;
+  }
+  const carriedStatus =
+    newest && newest.dealStatus === undefined
+      ? stale.find((entry) => entry.dealStatus !== undefined)?.dealStatus
+      : undefined;
+  if (carriedStatus !== undefined) cleanup[`index/${id}/dealStatus`] = carriedStatus;
 
   // The index fields are written one path each rather than as one object at `index/<id>`.
   //
@@ -89,27 +116,56 @@ export async function archiveProject(input: ArchiveInput): Promise<string> {
       // reader defaults it rather than treating its absence as a broken entry.
       editedAnswers: input.editedAnswers,
     },
+    ...cleanup,
   });
 
   return id;
 }
 
-/** The three reportable outcomes, and the only values ever written to `dealStatus`. */
-const DEAL_STATUSES: readonly DealStatus[] = ['won', 'lost', 'pending'];
-
-function toDealStatus(value: unknown): DealStatus {
-  // Anything unrecognised — absent, or a value from some future build — reads as pending rather than
-  // being trusted into the type. A status nobody has set and a status this build cannot interpret are
-  // the same thing from here: not reported.
-  return DEAL_STATUSES.includes(value as DealStatus) ? (value as DealStatus) : 'pending';
-}
-
-/** One-shot read of the completed-project list, newest export first. Carries no documents. */
-export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
+/**
+ * Every archive entry holding `filename`, newest export first, with its raw `dealStatus` (undefined
+ * when nobody has reported one).
+ *
+ * Reads the whole index, which is the small half of the archive by design (see the module comment), and
+ * applies the same "is this a real entry" guard as `listArchivedProjects` so a ghost left by
+ * `setDealStatus` is not picked up as the row to reuse.
+ */
+async function entriesForFilename(
+  filename: string
+): Promise<{ id: string; exportedAt: number; dealStatus: unknown }[]> {
   const snapshot = await get(ref(db, 'archivedProjects/index'));
   const val = snapshot.val() as Record<string, Partial<ArchivedProjectMeta>> | null;
   if (!val) return [];
   return Object.entries(val)
+    .filter(([, entry]) => entry.filename === filename && typeof entry.exportedAt === 'number')
+    .map(([id, entry]) => ({ id, exportedAt: entry.exportedAt as number, dealStatus: entry.dealStatus }))
+    .sort((a, b) => b.exportedAt - a.exportedAt);
+}
+
+/** The five reportable outcomes, and the only values ever written to `dealStatus`. */
+const DEAL_STATUSES: readonly DealStatus[] = ['submitted', 'won', 'lost', 'no-decision', 'no-bid'];
+
+function toDealStatus(value: unknown): DealStatus {
+  // Anything unrecognised — absent, the earlier build's `"pending"`, or a value from some future build —
+  // reads as submitted rather than being trusted into the type. A status nobody has set and a status
+  // this build cannot interpret are the same thing from here: not closed.
+  return DEAL_STATUSES.includes(value as DealStatus) ? (value as DealStatus) : 'submitted';
+}
+
+/**
+ * One-shot read of the completed-project list, newest export first. Carries no documents.
+ *
+ * One row per filename. `archiveProject` now reuses a same-named entry, but entries written before it
+ * did can still share a name, so they are collapsed here as well: the newest export is the row shown,
+ * and if nobody has reported its deal it borrows the outcome reported on an older one, rather than a
+ * duplicate quietly costing that report. An explicit Submitted counts as reported. The older entries
+ * stay in the database until the next export of that name removes them.
+ */
+export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
+  const snapshot = await get(ref(db, 'archivedProjects/index'));
+  const val = snapshot.val() as Record<string, Partial<ArchivedProjectMeta>> | null;
+  if (!val) return [];
+  const entries = Object.entries(val)
     // An entry with no filename or no export time is not a completed project. Same guard as
     // `listProjectMetas`, and for the same reason: `setDealStatus` writes with `update`, which creates
     // the node when it is absent, so an entry deleted out from under a status change would otherwise
@@ -124,16 +180,28 @@ export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
       itemCount: entry.itemCount ?? 0,
       sourceSessionId: entry.sourceSessionId ?? id,
       dealStatus: toDealStatus(entry.dealStatus),
+      reported: entry.dealStatus !== undefined,
     }))
-    .sort((a, b) => b.exportedAt - a.exportedAt);
+    // Oldest first, so each later export of a name replaces the one before it.
+    .sort((a, b) => a.exportedAt - b.exportedAt);
+
+  const byFilename = new Map<string, ArchivedProjectMeta>();
+  for (const { reported, ...meta } of entries) {
+    const earlier = byFilename.get(meta.filename);
+    byFilename.set(
+      meta.filename,
+      !reported && earlier ? { ...meta, dealStatus: earlier.dealStatus } : meta
+    );
+  }
+  return [...byFilename.values()].sort((a, b) => b.exportedAt - a.exportedAt);
 }
 
 /**
  * Report where a completed project's deal ended up.
  *
  * One field on the index entry, so it costs nothing to read back with the list and never touches the
- * payload. Writing `"pending"` stores it explicitly rather than clearing the child — the read defaults
- * a missing one to pending anyway, so the two are equivalent, and an explicit value is the honest record
+ * payload. Writing `"submitted"` stores it explicitly rather than clearing the child — the read defaults
+ * a missing one to submitted anyway, so the two are equivalent, and an explicit value is the honest record
  * of somebody having actively set it back.
  */
 export function setDealStatus(archiveId: string, status: DealStatus): Promise<void> {
