@@ -6,7 +6,7 @@ import ExportButton from "./ExportButton";
 import ProjectTeamPanel from "./ProjectTeamPanel";
 import type { ParsedQAFile, TeamMember } from "@/lib/types";
 
-export type ActiveView = "overview" | "inspector" | "database";
+export type ActiveView = "overview" | "inspector" | "database" | "admin";
 
 interface Props {
   data: ParsedQAFile | null;
@@ -39,6 +39,8 @@ interface Props {
   onExported: () => void;
   /** Start creating a project. Passed straight through to the Projects dropdown. */
   onNewProject: () => void;
+  /** Gates the two ways to remove a project from here: the Projects dropdown and Export and remove. */
+  isAdmin: boolean;
 }
 
 export default function Header({
@@ -60,6 +62,7 @@ export default function Header({
   onDocRemoved,
   onExported,
   onNewProject,
+  isAdmin,
 }: Props) {
   // Everything is approved only if there is something to approve — an empty file is not "done".
   const allApproved = totalCount > 0 && approvedCount === totalCount;
@@ -85,6 +88,7 @@ export default function Header({
               onDocRemoved={onDocRemoved}
               onExported={onExported}
               onNewProject={onNewProject}
+              isAdmin={isAdmin}
             />
             {/* Capped and truncating — see `.header-meta__filename`. A long project name used to grow
                 the row until `.header-meta` started scrolling, taking the export controls and the
@@ -120,6 +124,7 @@ export default function Header({
                 onError={onError}
                 onDocRemoved={onDocRemoved}
                 onExported={onExported}
+                isAdmin={isAdmin}
               />
             </div>
           )}

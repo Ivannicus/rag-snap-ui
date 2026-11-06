@@ -9,7 +9,7 @@ interface Props {
 }
 
 /**
- * The four figures a lead wants before reading any individual card.
+ * The figures a lead wants before reading any individual card.
  *
  * Counted over every active project, not the filtered view — the strip is meant to answer "how are we
  * doing overall", and a total that shifted every time someone narrowed the list by owner would answer
@@ -23,6 +23,11 @@ export default function ProjectSummaryStrip({ projects, archivedCount }: Props) 
 
   const questionTotal = projects.reduce((sum, p) => sum + p.stats.itemCount, 0);
   const approvedTotal = projects.reduce((sum, p) => sum + p.stats.approved, 0);
+  const ratedTotal = projects.reduce((sum, p) => sum + p.stats.ratedCount, 0);
+  const ratingSum = projects.reduce((sum, p) => sum + p.stats.ratingSum, 0);
+  // Averaged over every rated question, not over per-project averages, so a project with two ratings
+  // does not weigh as much as one with two hundred.
+  const averageRating = ratedTotal > 0 ? (ratingSum / ratedTotal).toFixed(1) : "—";
 
   const tiles: Array<{ label: string; value: number | string; modifier?: string; hint?: string }> = [
     { label: "Active projects", value: total, hint: `${questionTotal} questions in total` },
@@ -34,6 +39,12 @@ export default function ProjectSummaryStrip({ projects, archivedCount }: Props) 
       hint: questionTotal > 0 ? `${approvedTotal} of ${questionTotal} questions approved` : undefined,
     },
     { label: "Overdue", value: overdue, modifier: overdue > 0 ? "negative" : undefined },
+    {
+      label: "Average rating",
+      value: averageRating,
+      modifier: "rating",
+      hint: questionTotal > 0 ? `${ratedTotal} of ${questionTotal} questions rated` : undefined,
+    },
   ];
 
   return (
@@ -45,7 +56,14 @@ export default function ProjectSummaryStrip({ projects, archivedCount }: Props) 
             tile.modifier ? ` summary-strip__tile--${tile.modifier}` : ""
           }`}
         >
-          <span className="summary-strip__value">{tile.value}</span>
+          <span className="summary-strip__value">
+            {tile.value}
+            {tile.modifier === "rating" && ratedTotal > 0 && (
+              <span className="summary-strip__star" aria-hidden>
+                ★
+              </span>
+            )}
+          </span>
           <span className="summary-strip__label">{tile.label}</span>
           {tile.hint && <span className="summary-strip__hint">{tile.hint}</span>}
         </div>

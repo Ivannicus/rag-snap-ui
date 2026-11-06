@@ -22,6 +22,15 @@
   @include vanilla-framework.vf-icon-switcher-dashboard(vanilla-framework.$colors--dark-theme--icon);
 }
 
+// The export glyph beside Open project on each dashboard card. Not in the core set either, so it drew an
+// empty box until opted in here; same dark-mode restatement as `p-icon--switcher-dashboard` above, for
+// the same reason.
+@include vanilla-framework.vf-p-icon-export;
+
+.is-dark .p-icon--export {
+  @include vanilla-framework.vf-icon-export(vanilla-framework.$colors--dark-theme--icon);
+}
+
 // The speech-bubble on a question's comment tag and thread, opted in the same way and for the same two
 // reasons: `vanilla` does not compile it, and it is one of the older single-image icons whose dark
 // variant keys on `body.is-dark`, which this app never sets.
@@ -37,6 +46,14 @@
 
 .is-dark .p-icon--lock-locked {
   @include vanilla-framework.vf-icon-lock-locked(vanilla-framework.$colors--dark-theme--icon);
+}
+
+// The page glyph on project rows — the Projects dropdown, the Admin tab, the remove-project dialog and
+// the dashboard's empty state. Also outside the compiled set, so every one of those drew an empty box.
+@include vanilla-framework.vf-p-icon-file;
+
+.is-dark .p-icon--file {
+  @include vanilla-framework.vf-icon-file(vanilla-framework.$colors--dark-theme--icon);
 }
 
 // How wide a project's name may draw before it ellipses, wherever it shares a line with other controls.
@@ -186,6 +203,13 @@
     font-size: 0.875rem;
     line-height: 1;
     white-space: nowrap;
+  }
+
+  // The space typed between an icon and its label is dropped once the button is a flex container — a
+  // flex item's leading whitespace collapses — which left Export CSV's icon touching its text. The gap
+  // is the spacing instead.
+  .header-actions button {
+    gap: 0.5rem;
   }
 }
 
@@ -352,6 +376,14 @@
   // sidebar's 100.
   z-index: 40;
   width: 20rem;
+  // Capped like the Projects dropdown (`.file-loader__panel`), with only the list scrolling. Uncapped,
+  // a long bank ran the panel past the bottom of the window, which made the page tall enough to grow a
+  // scrollbar — and the scrollbar's width shoved every right-aligned button in this row 16px left
+  // whenever the panel opened. 66vh from just under the header always ends inside the window.
+  max-height: 66vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .filter-bar__add-member {
@@ -691,6 +723,14 @@
   &--band-unanswered {
     background-color: var(--vf-color-background-negative-default);
     border-color: var(--vf-color-border-negative);
+  }
+
+  // A count at zero: the box and its 0 stay, so the slot is never empty, but the tint goes and the box
+  // fades — colour is kept for counts that matter. Same rule as the section headers on feat/comments.
+  &--zero {
+    background-color: transparent;
+    border-color: var(--vf-color-border-low-contrast);
+    opacity: 0.5;
   }
 
   // Wraps a select rather than text, so the horizontal padding gets out of the way. The height stays
@@ -1637,7 +1677,9 @@ $presence-colour: vanilla-framework.$color-brand;
 .app-sidebar__nav-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  // Vanilla's base `button` centres its flex content; text-align alone does not move it.
+  justify-content: flex-start;
+  gap: 1.5rem;
   width: 100%;
   padding: 0.625rem 1rem;
   background: none;
@@ -1747,7 +1789,12 @@ $presence-colour: vanilla-framework.$color-brand;
   max-width: 80rem;
 }
 
+// A centred column. `text-align` alone is not enough: Vanilla gives `p` and the heading classes a
+// `max-width`, so each text box sat at the left edge with its text centred only inside that box.
 .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   padding: 5rem 0;
 
@@ -1844,19 +1891,21 @@ $presence-colour: vanilla-framework.$color-brand;
   text-align: right;
 }
 
-.export-button__badge {
-  margin-left: 0.5rem;
-  padding: 0.0625rem 0.4rem;
-  // Square, matching the badge style used everywhere else rather than a pill.
-  border-radius: 0;
-  font-size: 0.75rem;
-  background-color: rgb(255 255 255 / 20%);
-}
-
 .file-loader {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+// Every dropdown trigger here is a button followed by its panel, and Vanilla gives a button a 1rem
+// right margin unless it is `:last-child`. So the moment a panel opened, its trigger stopped being the
+// last child, gained the margin, and every right-aligned button in the row slid 16px left — and back
+// again on close. Zeroed on the trigger itself (0,1,1 beats Vanilla's single class); the wrappers'
+// own `gap` is the spacing.
+.file-loader > button,
+.header-manage-users > button,
+.manage-users > button {
+  margin-right: 0;
 }
 
 .file-loader__button {
@@ -1867,6 +1916,15 @@ $presence-colour: vanilla-framework.$color-brand;
   font-size: 0.875rem;
   border-radius: 0;
   border-color: var(--vf-color-border-high-contrast);
+}
+
+// A smaller plus with more room before the label. Three classes, because Vanilla's in-button icon rule
+// (`button [class*='p-icon']:first-child`, 0,2,1) sets the margins; the icon's background is `contain`,
+// so width and height together are what shrink the glyph.
+.overview__new-project.file-loader__button .p-icon--plus {
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0 0.5rem 0 0;
 }
 
 .file-loader__panel {
@@ -1888,7 +1946,9 @@ $presence-colour: vanilla-framework.$color-brand;
   flex-shrink: 0;
 }
 
-.file-loader__saved-list {
+// Also the Manage Users list, so the two dropdowns scroll alike.
+.file-loader__saved-list,
+.manage-users__list {
   flex: 1 1 auto;
   // Without this a flex child refuses to shrink below its content height, so the panel would grow
   // past max-height instead of scrolling.
@@ -2092,7 +2152,10 @@ $card-field-height: 1.75rem;
 // Reset once here, for spans only: an actual paragraph in this view still wants its spacing, and
 // `span` keeps this from touching one. `.overview` plus the element selector clears the 0,1,0 of
 // `.p-text--small` without needing `!important`.
-.overview span.p-text--small {
+// The Admin tab shares it: its panel counts are the same `span.p-text--small` chips, and without the
+// reset they sat half a line above the heading they belong to.
+.overview span.p-text--small,
+.admin span.p-text--small {
   margin-bottom: 0;
   padding-top: 0;
 }
@@ -2297,9 +2360,13 @@ $card-field-height: 1.75rem;
 
 /* ── Summary strip ── */
 
+// One row, always: every tile gets an equal column however many there are, rather than `auto-fit`
+// wrapping the last one onto a line of its own once a sixth tile was added. Only a phone-width screen,
+// where six columns would be too narrow to read, lets them wrap (below).
 .summary-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 1px;
   margin-bottom: 1.5rem;
   // A single background behind 1px grid gaps draws the dividers, so no tile needs its own border.
@@ -2321,6 +2388,21 @@ $card-field-height: 1.75rem;
   &--caution  { border-left-color: var(--vf-color-border-caution); }
   &--negative { border-left-color: var(--vf-color-border-negative); }
   &--muted    { border-left-color: var(--vf-color-border-low-contrast); }
+  // The star rating's own gold (`.star-rating__star.is-active`), so the tile reads as ratings.
+  &--rating   { border-left-color: #ffd700; }
+}
+
+@media (max-width: 48rem) {
+  .summary-strip {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+}
+
+.summary-strip__star {
+  margin-left: 0.25rem;
+  font-size: 1.25rem;
+  color: #ffd700;
 }
 
 .summary-strip__value {
@@ -2347,7 +2429,9 @@ $card-field-height: 1.75rem;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
   gap: 1.25rem;
-  align-items: start;
+  // Cards in a row share a height, with the Open button pinned to the bottom (`margin-top: auto` on
+  // the actions), so an unusually long name wrapping in one card cannot make its row ragged.
+  align-items: stretch;
 }
 
 /* ── Project list view ── */
@@ -2372,20 +2456,15 @@ $card-field-height: 1.75rem;
   --list-col-select: 1.25rem;
   --list-col-name: minmax(18rem, 1fr);
   --list-col-bar: 8rem;
-  // Sized for a badge at its widest, which is now every badge in the band: the count is padded to three
-  // digits, so `1 Ready` is exactly as wide as `129 Ready`.
-  //
-  // Each carries real headroom over the label it holds, deliberately. The badge's width comes from the
-  // font — a `3ch` digit box plus a word — while these are `rem`, so the two only agree by measurement,
-  // and a track that merely *just* fits at one font stack clips at the next. The slack costs nothing:
-  // the badge sits at the left of its cell and the name track absorbs whatever is left over.
-  //
-  // Each includes the badge's 1rem of extra right padding — change one and the other has to follow, or the
-  // padding comes straight back out of the label.
-  --list-col-approved: 8.5rem;
-  --list-col-ready: 7rem;
-  --list-col-unanswered: 9.5rem;
+  // The badges hold a number only — the heading names the band — so each track is sized for its
+  // heading, the widest thing in the column, with headroom: the heading's width comes from the font and
+  // these are `rem`, so a track that merely *just* fits at one font stack clips at the next.
+  --list-col-approved: 5rem;
+  --list-col-ready: 4rem;
+  --list-col-unanswered: 6rem;
   --list-col-team: 9rem;
+  // The Due button's own fixed width, shared with the card (see `.due-date-field`).
+  --list-col-due: #{$card-field-width};
 
   display: flex;
   flex-direction: column;
@@ -2394,7 +2473,7 @@ $card-field-height: 1.75rem;
 
 .project-list__row {
   display: grid;
-  // checkbox | name | approved bar | approved | ready | unanswered | team
+  // checkbox | name | approved bar | approved | ready | unanswered | team | due
   // The three badge tracks are in `STATUS_BANDS` order; `ProjectListRow` maps that array straight into
   // them, so reordering the array means reordering these three (and the header row's labels) with it.
   grid-template-columns:
@@ -2404,7 +2483,8 @@ $card-field-height: 1.75rem;
     var(--list-col-approved)
     var(--list-col-ready)
     var(--list-col-unanswered)
-    var(--list-col-team);
+    var(--list-col-team)
+    var(--list-col-due);
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -2488,10 +2568,12 @@ $card-field-height: 1.75rem;
 // on every row, so a count that widens from `9` to `142` grows rightwards into the column's own slack
 // instead of shifting where the eye has to look. The *group* of columns is what hugs the row's right
 // edge, and that comes from the elastic name track, not from anything in here.
+// Centred in its track, and so is the band's heading (`.project-list__band-head`), so the number sits
+// under the middle of the word naming it. The other columns still read from their left edge.
 .project-list__badge {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   overflow: hidden;
 
   // The badge draws at its own size and is never squeezed into the cell. Without this it is a shrinkable
@@ -2502,20 +2584,21 @@ $card-field-height: 1.75rem;
     flex: none;
   }
 
-  // Trailing room after the label, so the badge is not read as ending at the word. It roughly matches the
-  // pad the three-digit count leaves in front of a one-digit number, which is what makes the tile look
-  // deliberately sized rather than merely too big for its text.
-  //
-  // Scoped to the list on purpose: `.section-header__block` is shared with the section headers, where the
-  // tighter symmetric padding is the right look. Two classes beat the one-class base rule on specificity.
+  // Number only, centred in a box of one width for the whole band. Scoped to the list on purpose:
+  // `.section-header__block` is shared with the section headers. Two classes beat the one-class base rule.
   .section-header__block {
-    padding-right: 1.5rem;
+    justify-content: center;
+    padding: 0 0.5rem;
   }
 }
 
-// A three-digit box for the count, so every badge in a band is one width whatever the number: `1 Ready`
-// and `129 Ready` draw identical tiles, with the slack falling *before* the digits rather than stretching
-// the badge. Without this the tile's width tracked the count and the labels staggered down the column.
+.project-list__band-head {
+  text-align: center;
+}
+
+// A three-digit box for the count, so every badge in a band is one width whatever the number: `1` and
+// `129` draw identical tiles. Without this the tile's width tracked the count and the badges staggered
+// down the column.
 //
 // `ch` is the advance measure of `0`, so `3ch` is exactly three digits — and tabular figures are what
 // make that true of the other nine as well, `1` included. `min-width` rather than `width`: a fourth digit
@@ -2527,8 +2610,7 @@ $card-field-height: 1.75rem;
 .section-header__count {
   flex: none;
   min-width: 3ch;
-  margin-right: 0.25rem;
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2592,10 +2674,6 @@ $card-field-height: 1.75rem;
 
   .project-list__badge {
     flex: 0 0 auto;
-
-    &:empty {
-      display: none;
-    }
   }
 
   .project-list__head {
@@ -2670,19 +2748,14 @@ $card-field-height: 1.75rem;
   }
 }
 
-.project-card__uploader {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .project-card__status {
   flex-shrink: 0;
 }
 
+// Centred, so the Team/Due pair sits level with the middle of the wheel.
 .project-card__body {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 1rem;
 }
 
@@ -2694,10 +2767,37 @@ $card-field-height: 1.75rem;
   flex: 1 1 auto;
 }
 
+// A fixed 2×2 grid spanning the card, and every badge is always rendered (see ProjectCard), so the
+// badges take the same slots on every card whatever the counts are. The old wrapping flex row sized each
+// badge from its content and dropped the zero ones, so one card wrapped onto a second line and the next
+// did not.
 .project-card__badges {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.375rem;
+}
+
+// Grid items stretch to fill their half; `min-width: 0` and the ellipsis are a backstop for a label
+// that would otherwise force its track wider.
+.project-card__badge {
+  // The count-and-label group is centred in the tile. The count keeps its three-digit box, so the group
+  // is always as wide as it would be at `000` and a label does not shift as its count gains a digit.
+  justify-content: center;
+  // The approved tint carries a gap for its ✓ on question cards; here it would push that one label off
+  // the column's line.
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// The same three-digit box as `.project-list__badge-count`, so every label in a column starts at one x.
+.project-card__badge-count {
+  flex: none;
+  min-width: 3ch;
+  margin-right: 0.25rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-card__row {
@@ -2749,9 +2849,41 @@ $card-field-height: 1.75rem;
   font-weight: 550;
 }
 
+// The export icon beside Open project. The tooltip's message is `white-space: pre`, so the newline in
+// "Exported …\nby …" breaks the line.
+.project-card__export-info {
+  display: inline-flex;
+  cursor: default;
+
+  &.is-empty > i {
+    opacity: 0.4;
+  }
+
+  // Exported: a bare icon button that jumps to the completed list. Vanilla styles a bare `button`,
+  // so its chrome is stripped back to the icon.
+  &.is-link {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+
+    &:hover > i {
+      opacity: 0.7;
+    }
+  }
+}
+
+// Leave a little room above the completed list when an exported card scrolls to it.
+.overview__completed-anchor {
+  scroll-margin-top: 1rem;
+}
+
 .project-card__actions {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 0.75rem;
   margin-top: auto;
   padding-top: 0.25rem;
 }
@@ -2980,7 +3112,7 @@ $card-field-height: 1.75rem;
   --completed-col-questions: 7.5rem;
   --completed-col-by: 9rem;
   --completed-col-date: 11rem;
-  --completed-col-status: 8.5rem;
+  --completed-col-status: 11.5rem;
   --completed-col-action: 10rem;
 
   margin-top: 2.5rem;
@@ -3273,4 +3405,237 @@ select.completed-row__status {
 // scanned without reading every icon.
 .team-member-select__option.is-selected {
   background-color: var(--vf-color-background-information-default);
+}
+
+/* ── Admin tab ── */
+
+// Same width as the dashboard: the two-column layout below needs it, and at the narrower `.app-main`
+// default the users column would leave each row's actions no room.
+.admin {
+  max-width: 80rem;
+}
+
+.admin__head {
+  margin-bottom: 1.5rem;
+}
+
+// Projects on the left, users and the permissions table stacked on the right, sharing the width
+// evenly. (Was 3fr / 2fr; the right-hand column was widened by 1.25x, which comes out at half.) One
+// column once there is no room for two.
+.admin__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 70rem) {
+  .admin__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  // Stacked, there is no column beside it to match, so the list goes back to sizing itself.
+  .admin__panel-body {
+    min-height: 0;
+
+    > .admin__list {
+      position: static;
+      max-height: 34rem;
+    }
+  }
+}
+
+.admin__side {
+  display: grid;
+  gap: 1.5rem;
+}
+
+// Projects runs the full height of the column beside it: its top level with Users, its bottom level
+// with Roles & permissions. Stretched to the grid row, which the right-hand column sizes — the projects
+// list is taken out of flow (below) so it cannot make the row any taller, and scrolls inside whatever
+// height that leaves instead.
+.admin__panel--projects {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin__panel-body {
+  position: relative;
+  flex: 1 1 auto;
+  // Enough to show a few rows when the right-hand column happens to be short.
+  min-height: 12rem;
+
+  > .admin__list {
+    position: absolute;
+    inset: 0;
+    max-height: none;
+  }
+}
+
+// The grid owns the spacing; Vanilla's card margin would double it.
+.admin__panel.p-card {
+  margin-bottom: 0;
+}
+
+.admin__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin__panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0;
+  padding-top: 0;
+}
+
+// Title, Add user, then the search taking whatever the line has left — one row in the narrow column.
+// The box is Vanilla's `.p-search-box`, whose input is absolutely positioned across the wrapper, so
+// sizing the wrapper is what sizes the field.
+.admin__panel-head .admin__search {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+
+// Vanilla has no positive/negative *text* tokens; the border ones are what `.file-loader__error` uses.
+.admin__notice {
+  margin-bottom: 0.75rem;
+  color: var(--vf-color-border-positive);
+
+  &--error {
+    color: var(--vf-color-border-negative);
+  }
+}
+
+// Capped and scrolling, so a long bank does not push the projects column's height around or the page
+// into a scroll of its own.
+.admin__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 34rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  // The Projects dropdown's scrollbar (`.file-loader__saved-list`): thin, a high-contrast thumb on a
+  // transparent track rather than the platform's boxed default. The padding keeps it clear of the
+  // Remove buttons — it sits inside the scrollport, so the track lands to the right of it.
+  padding-right: 0.5rem;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vf-color-border-high-contrast) transparent;
+
+  // Always the height of the whole bank, capped where it starts scrolling, however many rows a search
+  // leaves — every row is `--admin-user-row` tall for exactly this reason.
+  &--users {
+    --admin-user-row: 4rem;
+    height: min(26rem, calc(var(--admin-user-rows, 1) * var(--admin-user-row)));
+    max-height: none;
+  }
+}
+
+.admin__list-empty {
+  padding: 0.5rem 0;
+}
+
+// Fixed tracks for the icon and actions, so the buttons line up down the list whatever the name
+// length — the same reason `.completed-row` is a grid.
+.admin-user,
+.admin-project {
+  display: grid;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--vf-color-border-low-contrast);
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+// A fixed height, so the list can be sized from a row count — see `.admin__list--users`.
+.admin-user {
+  box-sizing: border-box;
+  height: var(--admin-user-row);
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+}
+
+.admin-project {
+  grid-template-columns: 1rem minmax(0, 1fr) 1rem auto;
+}
+
+.admin-user__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.admin-user__name-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+// A compact `.section-header__block`, small enough to sit on a line of body text.
+.admin-user__badge.section-header__block {
+  flex: none;
+  height: 1.125rem;
+  padding: 0 0.375rem;
+  font-size: 0.75rem;
+}
+
+.admin-user__name,
+.admin-user__email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-user__email {
+  font-size: 0.8125rem;
+}
+
+.admin-user__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 40rem) {
+  // The actions wrap under the name here, so rows are no longer one height and the list goes back to
+  // sizing itself.
+  .admin__list--users {
+    height: auto;
+    max-height: 26rem;
+  }
+
+  .admin-user {
+    height: auto;
+  }
+
+  .admin-user__actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.admin__permissions {
+  font-size: 0.875rem;
+
+  th,
+  td {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+}
+
+.admin__permissions-col {
+  width: 4.5rem;
+  text-align: center;
 }

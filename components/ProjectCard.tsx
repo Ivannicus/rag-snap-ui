@@ -17,6 +17,8 @@ interface Props {
   onOpen: (projectId: string) => void;
   onChangeOwners: (projectId: string, memberIds: string[]) => void;
   onChangeDueDate: (projectId: string, isoDate: string | null) => void;
+  /** Scroll the dashboard down to the completed and exported list. */
+  onShowCompleted: () => void;
 }
 
 /** Green once everything is approved, amber while work is outstanding, red when overdue. */
@@ -35,6 +37,7 @@ export default function ProjectCard({
   onOpen,
   onChangeOwners,
   onChangeDueDate,
+  onShowCompleted,
 }: Props) {
   const { meta, overlays, stats } = project;
   const overdue = isOverdue(meta, stats);
@@ -69,9 +72,6 @@ export default function ProjectCard({
           >
             {meta.filename}
           </button>
-          <span className="u-text--muted p-text--small project-card__uploader">
-            Uploaded by {meta.uploadedByName} &middot; {formatTimestamp(meta.uploadedAt)}
-          </span>
         </div>
 
         <span
@@ -88,27 +88,6 @@ export default function ProjectCard({
         <ProgressWheel stats={stats} />
 
         <div className="project-card__facts">
-          <div className="project-card__badges">
-            <span className="section-header__block">
-              {stats.itemCount} {stats.itemCount === 1 ? "Question" : "Questions"}
-            </span>
-            {STATUS_BANDS.map((band) =>
-              stats[band.key] > 0 ? (
-                <span
-                  key={band.key}
-                  className={`section-header__block section-header__block--band-${band.modifier}`}
-                >
-                  {stats[band.key]} {band.label}
-                </span>
-              ) : null
-            )}
-            {stats.editedCount > 0 && (
-              <span className="section-header__block section-header__block--caution">
-                {stats.editedCount} Edited
-              </span>
-            )}
-          </div>
-
           <div className="project-card__row">
             {/* No icon. "Due" has none, and an icon here pushed "Team" a further icon-width-plus-gap to
                 the right, so the two labels in the same column started at different x positions. */}
@@ -137,15 +116,38 @@ export default function ProjectCard({
               onChange={(iso) => onChangeDueDate(meta.id, iso)}
             />
           </div>
-
-          {meta.exportedAt !== null && (
-            <p className="u-text--muted p-text--small u-no-margin--bottom">
-              <i className="p-icon--export" aria-hidden></i> Exported{" "}
-              {formatTimestamp(meta.exportedAt)}
-              {meta.exportedBy ? ` by ${meta.exportedBy}` : ""}
-            </p>
-          )}
         </div>
+      </div>
+
+      {/* Every badge always renders, in one fixed slot each, so no card is taller than another because of
+          which counts happen to be nonzero. A count at zero keeps its box and says 0 but drops its tint
+          and fades, as the section headers in the Collab UI do. The grid spans the whole card rather
+          than the column beside the wheel, which is too narrow for two tiles at the grid's minimum card
+          width — and the bands use their short labels so two fit across it. No Edited badge: edits are
+          already counted inside the three bands. */}
+      <div className="project-card__badges">
+        <span
+          className={`section-header__block project-card__badge${
+            stats.itemCount > 0 ? "" : " section-header__block--zero"
+          }`}
+        >
+          <span className="project-card__badge-count">{stats.itemCount}</span>
+          {stats.itemCount === 1 ? "Question" : "Questions"}
+        </span>
+        {STATUS_BANDS.map((band) => (
+          <span
+            key={band.key}
+            title={band.label}
+            className={`section-header__block project-card__badge ${
+              stats[band.key] > 0
+                ? `section-header__block--band-${band.modifier}`
+                : "section-header__block--zero"
+            }`}
+          >
+            <span className="project-card__badge-count">{stats[band.key]}</span>
+            {band.short}
+          </span>
+        ))}
       </div>
 
       <div className="project-card__actions">
@@ -166,6 +168,37 @@ export default function ProjectCard({
             "Open project"
           )}
         </button>
+
+        {/* Export provenance, on hover or focus. Always rendered, so it sits in the same place on every
+            card; faded when there is nothing to report yet. Once exported it is also a button that
+            jumps down to the completed list, where the archived copy can be re-downloaded. */}
+        {meta.exportedAt === null ? (
+          <span
+            className="p-tooltip--top-center project-card__export-info is-empty"
+            tabIndex={0}
+            aria-describedby={`export-info-${meta.id}`}
+          >
+            <i className="p-icon--export" aria-hidden></i>
+            <span className="p-tooltip__message" role="tooltip" id={`export-info-${meta.id}`}>
+              Not yet exported
+            </span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="p-tooltip--top-center project-card__export-info is-link"
+            onClick={onShowCompleted}
+            aria-label="Show in completed and exported"
+            aria-describedby={`export-info-${meta.id}`}
+          >
+            <i className="p-icon--export" aria-hidden></i>
+            <span className="p-tooltip__message" role="tooltip" id={`export-info-${meta.id}`}>
+              {`Exported ${formatTimestamp(meta.exportedAt)}${
+                meta.exportedBy ? `\nby ${meta.exportedBy}` : ""
+              }\nClick to view in completed`}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   );
