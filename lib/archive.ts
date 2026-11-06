@@ -62,23 +62,26 @@ interface ArchiveInput {
  * Ids stay collision-free after removal. Export-and-remove frees the `savedFiles` id, but the next
  * upload is a fresh `push` and never reuses it, so a later project cannot land on this entry.
  *
- * ## …unless the name is already in the archive
+ * ## Matching on the project, not the key
  *
- * Keying by project is not enough on its own: export-and-remove, then upload the same file again, and
- * the second export comes from a *new* project id with the same name — which used to add a second row
- * for what everyone reads as one finished project. So the newest entry already holding this filename is
- * reused instead (`entriesForFilename`). Its time, exporter, payload and `sourceSessionId` move to this
- * export; its `dealStatus` stays, for the same reason it survives a plain re-export below.
+ * The entry is found by project — any entry whose key *or* `sourceSessionId` is this project — rather
+ * than by `index/<sourceSessionId>` alone. An earlier build matched entries by filename and, when it
+ * found one, moved the new project's export onto the *old* project's entry: that entry is keyed by the
+ * old id but its `sourceSessionId` names the new project. Looking up the key alone would miss it and
+ * add a second row for the same project on its next export.
  *
- * Only the newest version is kept. Any *other* entry holding the name — left by builds that did not
- * reuse one — is deleted, index and payload both, in the same atomic `update` that writes this export,
- * so the archive never holds an older copy of a project alongside the one shown. If the reused entry is
- * no reported deal outcome and a deleted one has one, the outcome is carried over rather than lost with
- * it. "Reported" means the child exists at all — an explicit Submitted is a report too, so somebody
- * setting a deal back to Submitted is not overridden by an older duplicate's Closed-Won.
+ * Filenames are deliberately not a match. They are not unique over time — `saveFile` checks names
+ * against live projects only, so once a project is exported and removed an unrelated one can take its
+ * name — and matching on them let one project's export overwrite another's archived document and
+ * inherit its deal outcome.
+ *
+ * If more than one entry belongs to this project (possible only from that earlier build), the newest
+ * is kept and the rest are deleted, index and payload, in the same atomic `update`. If the kept entry
+ * has no reported deal outcome and a deleted one does, it is carried over. "Reported" means the child
+ * exists at all — an explicit Submitted is a report too.
  */
 export async function archiveProject(input: ArchiveInput): Promise<string> {
-  const [newest, ...stale] = await entriesForFilename(input.filename);
+  const [newest, ...stale] = await entriesForProject(input.sourceSessionId);
   const id = newest?.id ?? input.sourceSessionId;
   const exportedAt = Date.now();
 
@@ -123,21 +126,27 @@ export async function archiveProject(input: ArchiveInput): Promise<string> {
 }
 
 /**
- * Every archive entry holding `filename`, newest export first, with its raw `dealStatus` (undefined
- * when nobody has reported one).
+ * Every archive entry belonging to project `projectId` — keyed by it, or naming it as
+ * `sourceSessionId` — newest export first, with its raw `dealStatus` (undefined when nobody has
+ * reported one).
  *
  * Reads the whole index, which is the small half of the archive by design (see the module comment), and
  * applies the same "is this a real entry" guard as `listArchivedProjects` so a ghost left by
  * `setDealStatus` is not picked up as the row to reuse.
  */
-async function entriesForFilename(
-  filename: string
+async function entriesForProject(
+  projectId: string
 ): Promise<{ id: string; exportedAt: number; dealStatus: unknown }[]> {
   const snapshot = await get(ref(db, 'archivedProjects/index'));
   const val = snapshot.val() as Record<string, Partial<ArchivedProjectMeta>> | null;
   if (!val) return [];
   return Object.entries(val)
-    .filter(([, entry]) => entry.filename === filename && typeof entry.exportedAt === 'number')
+    .filter(
+      ([id, entry]) =>
+        (entry.sourceSessionId ?? id) === projectId &&
+        typeof entry.filename === 'string' &&
+        typeof entry.exportedAt === 'number'
+    )
     .map(([id, entry]) => ({ id, exportedAt: entry.exportedAt as number, dealStatus: entry.dealStatus }))
     .sort((a, b) => b.exportedAt - a.exportedAt);
 }
@@ -155,11 +164,11 @@ function toDealStatus(value: unknown): DealStatus {
 /**
  * One-shot read of the completed-project list, newest export first. Carries no documents.
  *
- * One row per filename. `archiveProject` now reuses a same-named entry, but entries written before it
- * did can still share a name, so they are collapsed here as well: the newest export is the row shown,
- * and if nobody has reported its deal it borrows the outcome reported on an older one, rather than a
- * duplicate quietly costing that report. An explicit Submitted counts as reported. The older entries
- * stay in the database until the next export of that name removes them.
+ * One row per project (`sourceSessionId`), not per filename: two projects can share a name over time
+ * and are different deals. An earlier build that matched on filename can have left more than one entry
+ * for one project, so they are collapsed here: the newest export is the row shown, and if nobody has
+ * reported its deal it borrows the outcome reported on an older one. An explicit Submitted counts as
+ * reported. The older entries stay in the database until that project's next export removes them.
  */
 export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
   const snapshot = await get(ref(db, 'archivedProjects/index'));
@@ -182,18 +191,18 @@ export async function listArchivedProjects(): Promise<ArchivedProjectMeta[]> {
       dealStatus: toDealStatus(entry.dealStatus),
       reported: entry.dealStatus !== undefined,
     }))
-    // Oldest first, so each later export of a name replaces the one before it.
+    // Oldest first, so each later export of a project replaces the one before it.
     .sort((a, b) => a.exportedAt - b.exportedAt);
 
-  const byFilename = new Map<string, ArchivedProjectMeta>();
+  const byProject = new Map<string, ArchivedProjectMeta>();
   for (const { reported, ...meta } of entries) {
-    const earlier = byFilename.get(meta.filename);
-    byFilename.set(
-      meta.filename,
+    const earlier = byProject.get(meta.sourceSessionId);
+    byProject.set(
+      meta.sourceSessionId,
       !reported && earlier ? { ...meta, dealStatus: earlier.dealStatus } : meta
     );
   }
-  return [...byFilename.values()].sort((a, b) => b.exportedAt - a.exportedAt);
+  return [...byProject.values()].sort((a, b) => b.exportedAt - a.exportedAt);
 }
 
 /**

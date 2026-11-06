@@ -1203,13 +1203,17 @@ export default function AppShell({
     // screen and editable while the modal is open. Left there, every edit after the discard would be
     // dropped silently by `writeToSession` — there is no room to address it to.
     handleCloseDoc();
+    // The dashboard's Remove is admin-only, so only an admin can be pointed at it. Anyone else is told
+    // to ask one — Discard itself is open to the uploader, but there is no second place for them to retry.
     removeSavedFile(existingDocId).catch(() =>
       showError(
         "The batch may not have been discarded",
-        "It could not be removed from the shared list. Check your connection, then remove it from the Overview dashboard."
+        isAdmin
+          ? "It could not be removed from the shared list. Check your connection, then remove it from the Overview dashboard."
+          : "It could not be removed from the shared list. Check your connection, then ask an admin to remove it from the Overview dashboard."
       )
     );
-  }, [pendingProject, showError, handleCloseDoc]);
+  }, [pendingProject, showError, handleCloseDoc, isAdmin]);
 
   /** The three tallies the top bar reports, counted once over the whole file. */
   const stateCounts = useMemo(() => {

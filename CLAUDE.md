@@ -679,8 +679,24 @@ admin; `/teamMembers/$memberId` only by its owner or an admin; and a `/savedFile
 keeps Discard batch working for a non-admin). For a non-admin, a write that leaves a `/savedFiles`
 record in place must also leave its `uploadedByEmail` as it was — otherwise "uploader" is something
 anyone could become one write before deleting. Every app writer keeps the field (`updateExistingDoc`
-copies the record, the migration writes per field). Not covered, and no worse than before this rule
-existed: a non-admin can still overwrite a record's other fields or a stored document. **If
+copies the record, the migration writes per field).
+
+**Removal can't be done by overwriting, either.** Refusing deletes alone left a back door: a non-admin
+could write junk over `savedFileData/<id>` (destroying the document) or empty a `savedFiles` record
+down to its `uploadedByEmail` (so `listProjectMetas` skips it as too partial) — the project gone for
+everyone, without a delete. Two rules close it:
+
+- **`savedFileData/$fileId` is write-once for non-admins.** They may create a document where none
+  exists, and delete one only as the uploader (or when its record is already gone); never overwrite.
+  No app path overwrites a document — `saveFile` and `migrateInlineData` only write where it is absent
+  — so **if you add a writer that edits a stored document, it will be refused for non-admins**.
+- **A `savedFiles` record must stay drawable** (`.validate`, for admins too): a non-empty string
+  `filename` and a numeric `uploadedAt`, the two fields `listProjectMetas` requires. Deletes are not
+  validated.
+
+Still not covered, deliberately: a non-admin can change a record's other fields (rename it, change its
+due date or counts). That is visible vandalism rather than a disappearance, and closing it would need a
+rule per field for every legitimate writer. **If
 `sanitizeEmailKey` ever changes, the rules' replace chain has to change with it**, or nobody's key
 matches and every admin check fails.
 
@@ -768,17 +784,20 @@ and unlike `savedFiles` the archive is never pruned. Split, the list reads `inde
 forever; a document is fetched (`getArchivedPayload`) only when someone asks to re-download it. Both
 halves are written in one multi-path `update`, so an entry cannot be listed without its payload.
 
-**The completed list holds one row per filename.** An entry is keyed by its project, but
-export-and-remove followed by a re-upload of the same file exports from a *new* project id, so
-`archiveProject` reuses the newest entry already holding that filename (`entriesForFilename`): time,
-exporter, payload and `sourceSessionId` move to the new export, `dealStatus` stays. **Only the newest
-version is kept** — any other entry with the name is deleted (index and payload) in the same atomic
-`update`, its deal outcome carried over if the kept one has none. "Has one" means the `dealStatus`
-child exists at all: an explicit Submitted is a report, so setting a deal back to Submitted is not
-overridden by an older duplicate's Closed-Won. A same-project re-export needs none
-of this: the entry is keyed by the project, so it is overwritten in place. Duplicates written before
-this are only cleaned up by the next export of that name, so `listArchivedProjects` still collapses
-same-named entries on read (newest wins, borrowing an older one's outcome if the newest has none).
+**The completed list holds one row per project, never per filename.** An entry is keyed by its
+project, so a re-export overwrites it in place. Filenames are **not** an identity: `saveFile` checks
+names against live projects only, so once a project is exported and removed an unrelated one can take
+its name. An earlier build matched on filename — reusing the newest same-named entry and deleting the
+rest — which let one project's export overwrite another's archived document and inherit its deal
+outcome, and hid every older same-named deal from the list. Do not bring it back.
+
+That build can have left an entry keyed by an *old* project id whose `sourceSessionId` names the new
+one, so `archiveProject` finds its entry by project (`entriesForProject`: key **or**
+`sourceSessionId`), keeps the newest, and deletes any other entry for the same project in the same
+atomic `update`, carrying over a deal outcome if the kept one has none. "Has one" means the
+`dealStatus` child exists at all: an explicit Submitted is a report. `listArchivedProjects` collapses
+by `sourceSessionId` on read the same way. A re-upload of the same file after export-and-remove is a
+new project and gets its own row — nothing reliably says two same-named entries are one deal.
 
 The completed list enumerates the archive, **not `/sessions`** — `/sessions` keeps a node per document
 ever opened and never sheds one, so listing it would show every abandoned project as finished.
